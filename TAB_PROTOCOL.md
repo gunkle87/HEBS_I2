@@ -1,5 +1,5 @@
 # HEBS Canonical Testing & Benchmarking Protocol
-Version: 1.1.0
+Version: 1.2.1
 Status: MANDATORY
 Authority: HEBS_SNAPSHOT.md
 
@@ -28,6 +28,8 @@ Authority: HEBS_SNAPSHOT.md
 * **Statistical Method**: Calculate results based on the **median** of the 10-iteration cold start.
 * **Required Output**: Return Median (p50), High (max), and Low (min) for every metric.
 * **Metadata**: Every report must include system info, time, date, and the current completed Git revision.
+* **ICF Canonical Formula**: `ICF = internal_node_transitions / primary_input_transitions`.
+* **ICF Comparability Rule**: ICF values generated before this formula lock are historical-only and not directly comparable to post-lock ICF values without re-running benchmarks under the locked formula.
 * **Metric List**:
     * **Statistical**: p50, p90, p95, p99, min, max, mean, variance, stddev.
     * **Execution**: total_runtime, throughput, latency_per_cycle, latency_per_vector, speedup, efficiency.
@@ -42,3 +44,11 @@ Authority: HEBS_SNAPSHOT.md
 * **Logic Fingerprint**: CRC32 of the final signal tray after the last tick.
 * **Plan Fingerprint**: Hash of the Linear Execution Plan (LEP) generated from the source `.bench`.
 * **Acceptance Gate**: Any revision that alters the Fingerprint on a stable benchmark or regresses p50 GEPS by >2% is a hard failure.
+
+## 6. Artifact Naming & HTML Lifecycle (Mandatory)
+* **Revision Token Source**: The active revision name (for example `Revision_Structure_v04`) is the naming root for generated report artifacts.
+* **Naming Rule**: New generated report files must include the active revision token in the filename.
+* **Minor Revision Overwrite Rule**: During a major revision phase, HTML report output for that revision must be overwritten per minor revision iteration.
+* **Final Minor Freeze Rule**: The last minor revision HTML for that major revision is the final HTML artifact and must not be overwritten by any later revision.
+* **Cross-Revision Isolation**: A subsequent major revision must write to a new revision-named HTML file and may not overwrite any prior major revision final HTML.
+* **History Rule**: CSV history remains append-only and must continue to carry revision metadata per run header.

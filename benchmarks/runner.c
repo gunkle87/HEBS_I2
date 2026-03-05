@@ -17,9 +17,9 @@
 #define SIM_CYCLES 100
 #define BENCH_ROOT "benchmarks/benches/"
 #define MAX_BENCH_RESULTS 256
-#define REVISION_NAME "Revision_Structure_v04"
+#define REVISION_NAME "Revision_Structure_v07"
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
-#define REPORT_HTML_PATH "benchmarks/results/revision_structure.html"
+#define REPORT_HTML_PATH "benchmarks/results/revision_structure_v07.html"
 
 static const char* hebs_basename_ptr(const char* path)
 {
@@ -214,7 +214,7 @@ static void hebs_finalize_metric_row(hebs_metric_row_t* row, const double* runti
 	row->geps_max = calculate_max(geps_runs, ITERATIONS);
 	row->geps_p50 = calculate_p50(geps_runs, ITERATIONS);
 	row->gates_per_second = row->geps_p50;
-	row->icf = calculate_icf(row->total_toggles, row->pi_count, row->cycles);
+	row->icf = calculate_icf(row->internal_transitions, row->primary_input_transitions);
 
 	row->total_runtime = row->runtime_p50;
 	row->throughput = (row->runtime_p50 > 0.0) ? (cycles_d / row->runtime_p50) : 0.0;
@@ -311,7 +311,10 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 	double runtimes[ITERATIONS];
 	double geps_runs[ITERATIONS];
 	uint32_t crc_runs[ITERATIONS];
+	hebs_metrics metrics;
 	uint64_t total_toggles;
+	uint64_t total_primary_input_transitions;
+	uint64_t total_internal_transitions;
 	uint32_t total_cycles;
 	uint32_t stable_crc;
 	int crc_stable;
@@ -326,6 +329,8 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 	memset(out_row, 0, sizeof(*out_row));
 	snprintf(out_row->suite_name, sizeof(out_row->suite_name), "%s", suite_name);
 	total_toggles = 0U;
+	total_primary_input_transitions = 0U;
+	total_internal_transitions = 0U;
 	total_cycles = 0U;
 	crc_stable = 1;
 	stable_crc = 0U;
@@ -371,6 +376,7 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 		runtimes[i] = timer_elapsed_sec(&timer);
 		geps_runs[i] = (runtimes[i] > 0.0) ? (((double)plan->gate_count * (double)SIM_CYCLES) / runtimes[i]) : 0.0;
 		crc_runs[i] = hebs_crc32_bytes((const uint8_t*)engine.signal_trays, (size_t)engine.tray_count * sizeof(uint64_t));
+		metrics = hebs_get_metrics(&engine, plan);
 
 		if (i == 0)
 		{
@@ -383,8 +389,10 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 
 		}
 
-		total_toggles += engine.input_toggle_count;
-		total_cycles += SIM_CYCLES;
+		total_toggles += metrics.primary_input_transitions;
+		total_primary_input_transitions += metrics.primary_input_transitions;
+		total_internal_transitions += metrics.internal_node_transitions;
+		total_cycles += (uint32_t)metrics.cycles_executed;
 		printf("Iteration %d: %.9f sec\n", i + 1, runtimes[i]);
 
 		if (i == ITERATIONS - 1)
@@ -392,12 +400,12 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 			char bench_name[128];
 			hebs_strip_extension(hebs_basename_ptr(bench_path), bench_name, sizeof(bench_name));
 			snprintf(out_row->benchmark, sizeof(out_row->benchmark), "%s", bench_name);
-			out_row->pi_count = plan->num_primary_inputs;
+			out_row->pi_count = metrics.pi_count;
 			out_row->cycles = total_cycles;
-			out_row->gate_count = plan->gate_count;
-			out_row->signal_count = plan->signal_count;
-			out_row->propagation_depth = plan->propagation_depth;
-			out_row->fanout_max = plan->fanout_max;
+			out_row->gate_count = metrics.gate_count;
+			out_row->signal_count = metrics.net_count;
+			out_row->propagation_depth = metrics.level_depth;
+			out_row->fanout_max = metrics.fanout_max;
 			out_row->total_fanout_edges = plan->total_fanout_edges;
 			out_row->plan_fingerprint = plan->lep_hash;
 
@@ -410,6 +418,8 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 	out_row->logic_fingerprint = stable_crc;
 	out_row->fingerprint_stable = (uint8_t)crc_stable;
 	out_row->total_toggles = total_toggles;
+	out_row->primary_input_transitions = total_primary_input_transitions;
+	out_row->internal_transitions = total_internal_transitions;
 	hebs_finalize_metric_row(out_row, runtimes, geps_runs);
 	hebs_apply_history_and_guardrail(out_row);
 

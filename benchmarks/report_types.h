@@ -18,6 +18,8 @@ typedef struct hebs_metric_row_s
 	uint32_t logic_fingerprint;
 	uint8_t fingerprint_stable;
 	uint64_t total_toggles;
+	uint64_t primary_input_transitions;
+	uint64_t internal_transitions;
 	double runtime_min;
 	double runtime_max;
 	double runtime_p50;

@@ -202,6 +202,32 @@ static int hebs_append_primary_input(uint32_t** ids, uint32_t* count, uint32_t* 
 
 }
 
+static int hebs_append_unique_id(uint32_t** ids, uint32_t* count, uint32_t* capacity, uint32_t value)
+{
+	uint32_t idx;
+
+	for (idx = 0U; idx < *count; ++idx)
+	{
+		if ((*ids)[idx] == value)
+		{
+			return 1;
+
+		}
+
+	}
+
+	if (!hebs_reserve_bytes((void**)ids, *count + 1U, capacity, sizeof(uint32_t)))
+	{
+		return 0;
+
+	}
+
+	(*ids)[*count] = value;
+	++(*count);
+	return 1;
+
+}
+
 static int hebs_append_gate(hebs_gate_raw_t** gates, uint32_t* count, uint32_t* capacity, const hebs_gate_raw_t* gate)
 {
 	if (!hebs_reserve_bytes((void**)gates, *count + 1U, capacity, sizeof(hebs_gate_raw_t)))
@@ -289,7 +315,7 @@ static hebs_gate_type_t hebs_parse_gate_type(const char* op, uint8_t* input_coun
 	{
 		*input_count = 1U;
 		*is_stateful = 1U;
-		return HEBS_GATE_BUF;
+		return HEBS_GATE_DFF;
 
 	}
 
@@ -456,6 +482,9 @@ static int hebs_load_and_parse(
 	uint32_t** primary_inputs,
 	uint32_t* primary_input_count,
 	uint32_t* primary_input_capacity,
+	uint32_t** primary_outputs,
+	uint32_t* primary_output_count,
+	uint32_t* primary_output_capacity,
 	hebs_gate_raw_t** gates,
 	uint32_t* gate_count,
 	uint32_t* gate_capacity)
@@ -515,8 +544,15 @@ static int hebs_load_and_parse(
 
 			}
 
-			(void)hebs_signal_get_or_add(signals, name, &ok);
+			signal_id = hebs_signal_get_or_add(signals, name, &ok);
 			if (!ok)
+			{
+				fclose(bench_file);
+				return 0;
+
+			}
+
+			if (!hebs_append_unique_id(primary_outputs, primary_output_count, primary_output_capacity, signal_id))
 			{
 				fclose(bench_file);
 				return 0;
@@ -674,10 +710,138 @@ static uint32_t hebs_levelize_and_pack(hebs_plan* plan, hebs_gate_raw_t* gates, 
 	plan->max_level = max_level;
 	plan->level_count = max_level + 1U;
 	plan->propagation_depth = max_level;
+	plan->fanout_avg = (signal_count > 0U) ? ((double)total_fanout_edges / (double)signal_count) : 0.0;
 	plan->fanout_max = fanout_max;
 	plan->total_fanout_edges = total_fanout_edges;
 	free(net_levels);
 	free(fanout_counts);
+	return 1;
+
+}
+
+static int hebs_index_dff_instructions(hebs_plan* plan)
+{
+	uint32_t idx;
+	uint32_t count;
+	uint32_t write_idx;
+
+	if (!plan || !plan->lep_data)
+	{
+		return 0;
+
+	}
+
+	count = 0U;
+	for (idx = 0U; idx < plan->gate_count; ++idx)
+	{
+		if ((hebs_gate_type_t)plan->lep_data[idx].gate_type == HEBS_GATE_DFF)
+		{
+			++count;
+
+		}
+
+	}
+
+	plan->dff_instruction_count = count;
+	plan->dff_instruction_indices = NULL;
+	if (count == 0U)
+	{
+		return 1;
+
+	}
+
+	plan->dff_instruction_indices = (uint32_t*)calloc(count, sizeof(uint32_t));
+	if (!plan->dff_instruction_indices)
+	{
+		plan->dff_instruction_count = 0U;
+		return 0;
+
+	}
+
+	write_idx = 0U;
+	for (idx = 0U; idx < plan->gate_count; ++idx)
+	{
+		if ((hebs_gate_type_t)plan->lep_data[idx].gate_type == HEBS_GATE_DFF)
+		{
+			plan->dff_instruction_indices[write_idx++] = idx;
+
+		}
+
+	}
+
+	return 1;
+
+}
+
+static int hebs_build_internal_transition_mask(hebs_plan* plan)
+{
+	uint8_t* is_primary_input;
+	uint32_t idx;
+
+	if (!plan)
+	{
+		return 0;
+
+	}
+
+	plan->internal_transition_lsb_mask = NULL;
+	if (plan->tray_count == 0U || plan->signal_count == 0U)
+	{
+		return 1;
+
+	}
+
+	plan->internal_transition_lsb_mask = (uint64_t*)calloc(plan->tray_count, sizeof(uint64_t));
+	if (!plan->internal_transition_lsb_mask)
+	{
+		return 0;
+
+	}
+
+	is_primary_input = (uint8_t*)calloc(plan->signal_count, sizeof(uint8_t));
+	if (!is_primary_input)
+	{
+		free(plan->internal_transition_lsb_mask);
+		plan->internal_transition_lsb_mask = NULL;
+		return 0;
+
+	}
+
+	for (idx = 0U; idx < plan->num_primary_inputs; ++idx)
+	{
+		uint32_t signal_id = plan->primary_input_ids[idx];
+		if (signal_id < plan->signal_count)
+		{
+			is_primary_input[signal_id] = 1U;
+
+		}
+
+	}
+
+	for (idx = 0U; idx < plan->signal_count; ++idx)
+	{
+		uint32_t bit_offset;
+		uint32_t tray_index;
+		uint32_t bit_position;
+
+		if (is_primary_input[idx])
+		{
+			continue;
+
+		}
+
+		bit_offset = idx * 2U;
+		tray_index = bit_offset / 64U;
+		bit_position = bit_offset % 64U;
+		if (tray_index < plan->tray_count)
+		{
+			plan->internal_transition_lsb_mask[tray_index] |= (1ULL << bit_position);
+
+		}
+
+	}
+
+	free(is_primary_input);
 	return 1;
 
 }
@@ -739,6 +903,9 @@ hebs_plan* hebs_load_bench(const char* file_path)
 	uint32_t* primary_inputs;
 	uint32_t primary_input_count;
 	uint32_t primary_input_capacity;
+	uint32_t* primary_outputs;
+	uint32_t primary_output_count;
+	uint32_t primary_output_capacity;
 	hebs_gate_raw_t* gates;
 	uint32_t gate_count;
 	uint32_t gate_capacity;
@@ -753,6 +920,9 @@ hebs_plan* hebs_load_bench(const char* file_path)
 	primary_inputs = NULL;
 	primary_input_count = 0U;
 	primary_input_capacity = 0U;
+	primary_outputs = NULL;
+	primary_output_count = 0U;
+	primary_output_capacity = 0U;
 	gates = NULL;
 	gate_count = 0U;
 	gate_capacity = 0U;
@@ -763,12 +933,16 @@ hebs_plan* hebs_load_bench(const char* file_path)
 		&primary_inputs,
 		&primary_input_count,
 		&primary_input_capacity,
+		&primary_outputs,
+		&primary_output_count,
+		&primary_output_capacity,
 		&gates,
 		&gate_count,
 		&gate_capacity))
 	{
 		hebs_free_signal_table(&signals);
 		free(primary_inputs);
+		free(primary_outputs);
 		free(gates);
 		return NULL;
 
@@ -779,6 +953,7 @@ hebs_plan* hebs_load_bench(const char* file_path)
 	{
 		hebs_free_signal_table(&signals);
 		free(primary_inputs);
+		free(primary_outputs);
 		free(gates);
 		return NULL;
 
@@ -786,6 +961,7 @@ hebs_plan* hebs_load_bench(const char* file_path)
 
 	plan->signal_count = signals.count;
 	plan->num_primary_inputs = primary_input_count;
+	plan->num_primary_outputs = primary_output_count;
 	plan->tray_count = (signals.count + 31U) / 32U;
 	plan->gate_count = 0U;
 	plan->primary_input_ids = primary_inputs;
@@ -793,6 +969,27 @@ hebs_plan* hebs_load_bench(const char* file_path)
 	if (!hebs_levelize_and_pack(plan, gates, gate_count, signals.count))
 	{
 		hebs_free_signal_table(&signals);
+		free(primary_outputs);
+		free(gates);
+		hebs_free_plan(plan);
+		return NULL;
+
+	}
+
+	if (!hebs_index_dff_instructions(plan))
+	{
+		hebs_free_signal_table(&signals);
+		free(primary_outputs);
+		free(gates);
+		hebs_free_plan(plan);
+		return NULL;
+
+	}
+
+	if (!hebs_build_internal_transition_mask(plan))
+	{
+		hebs_free_signal_table(&signals);
+		free(primary_outputs);
 		free(gates);
 		hebs_free_plan(plan);
 		return NULL;
@@ -801,6 +998,7 @@ hebs_plan* hebs_load_bench(const char* file_path)
 
 	plan->lep_hash = hebs_calculate_lep_hash(plan);
 	hebs_free_signal_table(&signals);
+	free(primary_outputs);
 	free(gates);
 	return plan;
 
@@ -816,6 +1014,8 @@ void hebs_free_plan(hebs_plan* plan)
 
 	free(plan->primary_input_ids);
 	free(plan->lep_data);
+	free(plan->dff_instruction_indices);
+	free(plan->internal_transition_lsb_mask);
 	free(plan);
 
 }

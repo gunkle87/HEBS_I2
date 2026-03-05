@@ -4,7 +4,7 @@
 
 # 1. PATH DEFINITIONS (Windows-friendly backslashes for shell commands)
 CORE_DIR       = core
-INCLUDES_DIR   = core\includes
+INCLUDES_DIR   = include
 BENCH_DIR      = benchmarks
 BENCH_FILES    = benchmarks\benches
 RESULT_DIR     = benchmarks\results
@@ -15,11 +15,11 @@ BUILD_DIR      = build
 # 2. COMPILER SETTINGS
 CC             = gcc
 # Note: GCC still prefers forward slashes for include paths
-CFLAGS         = -Icore/includes -O3 -march=native -Wall -Wextra -pthread
+CFLAGS         = -Iinclude -O3 -march=native -Wall -Wextra -pthread
 LDFLAGS        = -pthread
 
 # 3. TARGETS
-CORE_SRC       = core/engine.c core/loader.c core/primitives.c
+CORE_SRC       = core/engine.c core/loader.c core/primitives.c core/state_manager.c
 RUNNER_SRC     = benchmarks/runner.c
 TEST_SRC       = tests/test_runner.c
 

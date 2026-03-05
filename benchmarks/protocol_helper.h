@@ -150,15 +150,15 @@ static double calculate_max(const double* values, int count)
 
 }
 
-static double calculate_icf(uint64_t total_toggles, uint32_t num_pi, uint32_t cycles)
+static double calculate_icf(uint64_t internal_transitions, uint64_t primary_input_transitions)
 {
-	if (num_pi == 0 || cycles == 0)
+	if (primary_input_transitions == 0U)
 	{
 		return 0.0;
 
 	}
 
-	return (double)total_toggles / ((double)num_pi * (double)cycles);
+	return (double)internal_transitions / (double)primary_input_transitions;
 
 }
 

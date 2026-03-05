@@ -1,6 +1,6 @@
 ﻿# HEBS Repository Agent Policy
 
-Version: HBS-0.1.1
+Version: HBS-0.1.2
 Scope: Entire repository
 
 ## 1. Command Authority
@@ -30,6 +30,7 @@ Governance and canonical files:
 - `HEBS_TECH_SPEC.md`
 - `HEBS_ROADMAP.md`
 - `HEBS_HISTORY.md`
+- `HEBS_REPO_MAP.md`
 
 ## 3. Authorization Tiers
 
@@ -73,6 +74,9 @@ Authorization mapping:
    - Role: delivery phases and acceptance gates.
 5. `HEBS_HISTORY.md`
    - Role: phase chronology and outcomes.
+6. `HEBS_REPO_MAP.md`
+   - Role: repository-wide technical reference (directory map, API registry, symbol inventory, examples, and ledgers).
+   - Edit policy: Restricted to `DO: CANON_CHANGE`.
 
 ## 6) Response Style
 1. Use plain English and conversational tone.
@@ -138,10 +142,12 @@ Authorization mapping:
 
 1. Emit Tenet Impact Notice.
 2. Propose change scope.
-3. Receive matching authorization.
-4. Implement only within approved scope.
-5. Update canonical staging/history artifacts when governance impact exists.
-6. Run verifier when execution approval includes command execution.
+3. If any requested action conflicts with documented requirements, list each conflict as a named deviation.
+4. For each named deviation, require an explicit approval token in the form `APPROVED <DeviationName>`.
+5. Receive matching authorization.
+6. Implement only within approved scope.
+7. Update canonical staging/history artifacts when governance impact exists.
+8. Run verifier when execution approval includes command execution.
 
 ## 12. Context Reset and Handoff
 
@@ -151,3 +157,20 @@ Authorization mapping:
    - locked baselines
    - next actions
 2. When starting a new thread/session, use the handoff file and current canonical docs as the only required context.
+
+## 13. Repo Map Maintenance Mandate
+
+1. `HEBS_REPO_MAP.md` must be updated in the same approved change whenever repository facts change.
+2. Mandatory update triggers include:
+   - Added, removed, or renamed functions.
+   - Added, removed, or renamed enums, structs, constants, macros, or variables documented as part of behavior or interface.
+   - Added, removed, renamed, or moved files and directories.
+   - Changes to API usage flow, examples, benchmarks, ledgers, or artifact paths.
+3. A state-changing implementation is non-compliant if it leaves `HEBS_REPO_MAP.md` stale.
+
+## 14. Conflict Clarification Language (Mandatory)
+
+1. When a directive conflicts with documented requirements, the assistant must pause and issue one explicit line per conflict.
+2. Each line must name the conflict and required approval token using this format:
+   - `This <DeviationName> is not the same as required in documentation. Reply APPROVED <DeviationName> to explicitly confirm and continue.`
+3. Work may continue only after all listed deviation tokens are explicitly approved.

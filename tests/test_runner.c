@@ -45,7 +45,7 @@ static void test_functional_gate_suite(void)
 	uint32_t primary_inputs[2] = { 0U, 1U };
 	hebs_lep_instruction_t lep_data[2];
 	hebs_logic_t states[8] = { HEBS_S0, HEBS_S1, HEBS_W0, HEBS_W1, HEBS_Z, HEBS_X, HEBS_SX, HEBS_WX };
-	hebs_plan plan;
+	hebs_plan plan = { 0 };
 	int a_idx;
 	int b_idx;
 
@@ -109,7 +109,7 @@ static void test_interleaved_bit_offset_mapping(void)
 {
 	hebs_engine engine = { 0 };
 	uint32_t primary_inputs[1] = { 33U };
-	hebs_plan plan;
+	hebs_plan plan = { 0 };
 
 	plan.lep_hash = 2U;
 	plan.level_count = 1U;
@@ -133,7 +133,7 @@ static void test_icf_math_assertion(void)
 {
 	hebs_engine engine = { 0 };
 	uint32_t primary_inputs[1] = { 0U };
-	hebs_plan plan;
+	hebs_plan plan = { 0 };
 	uint32_t cycle;
 	double icf;
 
@@ -158,8 +158,50 @@ static void test_icf_math_assertion(void)
 	}
 
 	assert(engine.input_toggle_count == 5U);
-	icf = calculate_icf(engine.input_toggle_count, 1U, 10U);
-	assert(fabs(icf - 0.5) < 1e-12);
+	assert(engine.internal_transition_count == 0U);
+	icf = calculate_icf(engine.internal_transition_count, engine.input_toggle_count);
+	assert(fabs(icf - 0.0) < 1e-12);
+	icf = calculate_icf(15U, 5U);
+	assert(fabs(icf - 3.0) < 1e-12);
+
+}
+
+static void test_parallel_dff_tray_commit(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_lep_instruction_t lep_data[1];
+	uint32_t dff_indices[1] = { 0U };
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_DFF;
+	lep_data[0].input_count = 1U;
+	lep_data[0].level = 0U;
+	lep_data[0].src_a_bit_offset = 0U;
+	lep_data[0].src_b_bit_offset = 0U;
+	lep_data[0].dst_bit_offset = 2U;
+
+	plan.lep_hash = 4U;
+	plan.level_count = 1U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 2U;
+	plan.gate_count = 1U;
+	plan.tray_count = 1U;
+	plan.max_level = 0U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+	plan.dff_instruction_count = 1U;
+	plan.dff_instruction_indices = dff_indices;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_signal_state(&engine, 1U) == HEBS_S0);
+
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_signal_state(&engine, 1U) == HEBS_S1);
+	assert(((engine.dff_state_trays[0] >> 2U) & 0x3ULL) == (uint64_t)HEBS_S1);
 
 }
 
@@ -174,6 +216,37 @@ static void test_protocol_helper_stats(void)
 
 }
 
+static void test_extended_primitive_suite(void)
+{
+	uint64_t tri_data;
+	uint64_t tri_enable;
+
+	assert(hebs_eval_xor(HEBS_S0, HEBS_S0) == HEBS_S0);
+	assert(hebs_eval_xor(HEBS_S1, HEBS_S0) == HEBS_S1);
+	assert(hebs_eval_nand(HEBS_S1, HEBS_S1) == HEBS_S0);
+	assert(hebs_eval_nor(HEBS_S0, HEBS_S0) == HEBS_S1);
+	assert(hebs_eval_xnor(HEBS_S1, HEBS_S1) == HEBS_S1);
+	assert(hebs_eval_buf(HEBS_W0) == HEBS_W0);
+	assert(hebs_eval_weak_pull(HEBS_Z) == HEBS_W1);
+	assert(hebs_eval_strong_pull(HEBS_Z) == HEBS_S1);
+	assert(hebs_eval_vcc() == HEBS_S1);
+	assert(hebs_eval_gnd() == HEBS_S0);
+	assert(hebs_eval_tristate(HEBS_S1, HEBS_S1) == HEBS_S1);
+	assert(hebs_eval_tristate(HEBS_S1, HEBS_S0) == HEBS_Z);
+
+	assert(hebs_gate_buf_simd(0x1234567890ABCDEFULL) == 0x1234567890ABCDEFULL);
+	assert(hebs_gate_vcc_simd() == 0x5555555555555555ULL);
+	assert(hebs_gate_gnd_simd() == 0x0ULL);
+
+	tri_data = 0xAAAAAAAAAAAAAAAAULL;
+	tri_enable = 0x5555555555555555ULL;
+	assert(hebs_gate_tristate_simd(tri_data, tri_enable) == tri_data);
+
+	tri_enable = 0x0ULL;
+	assert(hebs_gate_tristate_simd(tri_data, tri_enable) == 0x0ULL);
+
+}
+
 int main(void)
 {
 	assert(HEBS_S1 == 1);
@@ -182,7 +255,9 @@ int main(void)
 	test_functional_gate_suite();
 	test_interleaved_bit_offset_mapping();
 	test_icf_math_assertion();
+	test_parallel_dff_tray_commit();
 	test_protocol_helper_stats();
+	test_extended_primitive_suite();
 	return 0;
 
 }

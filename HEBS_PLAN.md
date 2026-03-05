@@ -144,3 +144,29 @@ CORE PILLAR (The Library):
         - bit_tray_in/out: Flat uint64_t arrays representing logic levels.
     - core/loader.c: The Circuit Architect.
         - hebs_compile_lep(): Translates .bench files into the LEP.
+
+
+4. GOVERNANCE ADDENDUM (MANDATORY)
+
+REPO MAP MAINTENANCE:
+    - HEBS_REPO_MAP.md must be updated whenever functions, variables, types, constants,
+      files, or directories are added, removed, renamed, or behaviorally changed.
+
+REVISION-BASED ARTIFACT NAMING:
+    - Generated report artifact names must use the active Revision token.
+    - HTML output for a major Revision is overwritten per minor revision.
+    - The last minor revision HTML is the final HTML for that Revision and must never
+      be overwritten by subsequent Revisions.
+
+DIRECTIVE VS DOCUMENT CONFLICT RULE:
+    - If a directive conflicts with documented requirements, each conflict must be named
+      and explicitly approved before work continues.
+    - Required language per conflict:
+      "This <DeviationName> is not the same as required in documentation. Reply APPROVED
+      <DeviationName> to explicitly confirm and continue."
+
+ICF CANONICAL DEFINITION:
+    - ICF is defined as:
+      internal node transitions / primary input transitions
+    - Historical ICF values produced with any prior formula are not directly comparable
+      to the canonical formula and must be labeled as pre-canonical in reports.
