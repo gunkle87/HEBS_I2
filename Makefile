@@ -1,66 +1,57 @@
-CC = gcc
-CFLAGS_COMMON = -Wall -Wextra -std=c11 -I./include
-LDFLAGS_COMMON =
+# ==============================================================================
+# HEBS_CLEAN MASTER MAKEFILE - REVISION_STRUCTURE_V01 (Windows Native)
+# ==============================================================================
 
-# Build Profiles
-CFLAGS_DEBUG = $(CFLAGS_COMMON) -g -O0
-CFLAGS_RELEASE = $(CFLAGS_COMMON) -O3 -DNDEBUG
-CFLAGS_PERF = $(CFLAGS_RELEASE) -march=native -fno-plt -static
-CFLAGS_VERIFY = $(CFLAGS_COMMON) -O2 -static
+# 1. PATH DEFINITIONS (Windows-friendly backslashes for shell commands)
+CORE_DIR       = core
+INCLUDES_DIR   = core\includes
+BENCH_DIR      = benchmarks
+BENCH_FILES    = benchmarks\benches
+RESULT_DIR     = benchmarks\results
+TEST_DIR       = tests
+TEST_RESULTS   = tests\results
+BUILD_DIR      = build
 
-# Directories
-SRC_DIR = src
-INC_DIR = include
-TOOLS_DIR = tools
-TESTS_DIR = tests
-BIN_DIR = bin
-BUILD_DIR = build
+# 2. COMPILER SETTINGS
+CC             = gcc
+# Note: GCC still prefers forward slashes for include paths
+CFLAGS         = -Icore/includes -O3 -march=native -Wall -Wextra -pthread
+LDFLAGS        = -pthread
 
-# Source files (Engine)
-ENGINE_SRCS = $(wildcard $(SRC_DIR)/*.c)
-ENGINE_OBJS_PERF = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/perf/%.o, $(ENGINE_SRCS))
-ENGINE_OBJS_DEBUG = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/debug/%.o, $(ENGINE_SRCS))
+# 3. TARGETS
+CORE_SRC       = core/engine.c core/loader.c core/primitives.c
+RUNNER_SRC     = benchmarks/runner.c
+TEST_SRC       = tests/test_runner.c
 
-# Default profile is perf for benchmarking as per TAB_PROTOCOL
-all: perf
+# 4. BUILD RULES
+all: setup hebs_cli hebs_test
 
-# --- Perf Build ---
-perf: $(BIN_DIR)/hebs_bench_runner
+# Setup using Windows 'cmd' syntax
+setup:
+	@if not exist $(CORE_DIR) mkdir $(CORE_DIR)
+	@if not exist $(INCLUDES_DIR) mkdir $(INCLUDES_DIR)
+	@if not exist $(BENCH_DIR) mkdir $(BENCH_DIR)
+	@if not exist $(BENCH_FILES) mkdir $(BENCH_FILES)
+	@if not exist $(RESULT_DIR) mkdir $(RESULT_DIR)
+	@if not exist $(TEST_DIR) mkdir $(TEST_DIR)
+	@if not exist $(TEST_RESULTS) mkdir $(TEST_RESULTS)
+	@if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
+	@echo HEBS_CLEAN: Directory structure initialized.
 
-$(BIN_DIR)/hebs_bench_runner: $(TOOLS_DIR)/hebs_bench_runner.c $(ENGINE_OBJS_PERF) | $(BIN_DIR)
-	$(CC) $(CFLAGS_PERF) $^ -o $@ $(LDFLAGS_COMMON)
+# Compile the Benchmark Runner
+hebs_cli:
+	$(CC) $(CFLAGS) $(CORE_SRC) $(RUNNER_SRC) -o $(BUILD_DIR)/hebs_cli $(LDFLAGS)
 
-$(BUILD_DIR)/perf/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)/perf
-	$(CC) $(CFLAGS_PERF) -c $< -o $@
+# Compile the Test Suite
+hebs_test:
+	$(CC) $(CFLAGS) $(CORE_SRC) $(TEST_SRC) -o $(BUILD_DIR)/hebs_test $(LDFLAGS)
 
-# --- Debug Build ---
-debug: $(BIN_DIR)/hebs_bench_runner_debug
-
-$(BIN_DIR)/hebs_bench_runner_debug: $(TOOLS_DIR)/hebs_bench_runner.c $(ENGINE_OBJS_DEBUG) | $(BIN_DIR)
-	$(CC) $(CFLAGS_DEBUG) $^ -o $@ $(LDFLAGS_COMMON)
-
-$(BUILD_DIR)/debug/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)/debug
-	$(CC) $(CFLAGS_DEBUG) -c $< -o $@
-
-# --- Verification & Tests ---
-verify: $(BIN_DIR)/hebs_verify_runner
-	@echo "Running Verification Suite..."
-	# $(BIN_DIR)/hebs_verify_runner
-
-$(BIN_DIR)/hebs_verify_runner: $(TESTS_DIR)/verify_runner.c $(ENGINE_OBJS_DEBUG) | $(BIN_DIR)
-	$(CC) $(CFLAGS_VERIFY) $^ -o $@ $(LDFLAGS_COMMON)
-
-# --- Directory Creation ---
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
-
-$(BUILD_DIR)/perf:
-	mkdir -p $(BUILD_DIR)/perf
-
-$(BUILD_DIR)/debug:
-	mkdir -p $(BUILD_DIR)/debug
+# 5. EXECUTION TARGETS
+verify:
+	.\$(BUILD_DIR)\hebs_test
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN_DIR)/*
+	@if exist $(BUILD_DIR) rd /s /q $(BUILD_DIR)
+	@echo HEBS_CLEAN: Build artifacts removed.
 
-.PHONY: all perf debug verify clean
+.PHONY: all setup clean verify

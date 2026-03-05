@@ -1,0 +1,821 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include "hebs_engine.h"
+
+typedef struct hebs_signal_table_s
+{
+	char** names;
+	uint32_t count;
+	uint32_t capacity;
+
+} hebs_signal_table_t;
+
+typedef struct hebs_gate_raw_s
+{
+	hebs_gate_type_t type;
+	uint32_t src_a;
+	uint32_t src_b;
+	uint32_t dst;
+	uint32_t level;
+	uint8_t input_count;
+	uint8_t is_stateful;
+
+} hebs_gate_raw_t;
+
+static uint64_t hebs_hash_mix(uint64_t hash, uint64_t value)
+{
+	hash ^= value;
+	hash *= 1099511628211ULL;
+	return hash;
+
+}
+
+static char* hebs_strdup_local(const char* text)
+{
+	size_t len;
+	char* copy;
+
+	if (!text)
+	{
+		return NULL;
+
+	}
+
+	len = strlen(text);
+	copy = (char*)malloc(len + 1U);
+	if (!copy)
+	{
+		return NULL;
+
+	}
+
+	memcpy(copy, text, len + 1U);
+	return copy;
+
+}
+
+static int hebs_reserve_bytes(void** ptr, uint32_t needed, uint32_t* capacity, size_t elem_size)
+{
+	uint32_t new_capacity;
+	void* resized;
+
+	if (needed <= *capacity)
+	{
+		return 1;
+
+	}
+
+	new_capacity = (*capacity == 0U) ? 16U : (*capacity * 2U);
+	while (new_capacity < needed)
+	{
+		new_capacity *= 2U;
+
+	}
+
+	resized = realloc(*ptr, (size_t)new_capacity * elem_size);
+	if (!resized)
+	{
+		return 0;
+
+	}
+
+	*ptr = resized;
+	*capacity = new_capacity;
+	return 1;
+
+}
+
+static char* hebs_trim(char* text)
+{
+	char* end;
+
+	if (!text)
+	{
+		return text;
+
+	}
+
+	while (*text && isspace((unsigned char)*text))
+	{
+		++text;
+
+	}
+
+	if (*text == '\0')
+	{
+		return text;
+
+	}
+
+	end = text + strlen(text) - 1;
+	while (end > text && isspace((unsigned char)*end))
+	{
+		*end = '\0';
+		--end;
+
+	}
+
+	return text;
+
+}
+
+static void hebs_strip_comment(char* line)
+{
+	char* hash;
+
+	if (!line)
+	{
+		return;
+
+	}
+
+	hash = strchr(line, '#');
+	if (hash)
+	{
+		*hash = '\0';
+
+	}
+
+}
+
+static uint32_t hebs_signal_get_or_add(hebs_signal_table_t* table, const char* name, int* ok)
+{
+	uint32_t idx;
+	char* copy;
+
+	if (!table || !name || !ok)
+	{
+		if (ok)
+		{
+			*ok = 0;
+
+		}
+		return 0;
+
+	}
+
+	for (idx = 0; idx < table->count; ++idx)
+	{
+		if (strcmp(table->names[idx], name) == 0)
+		{
+			*ok = 1;
+			return idx;
+
+		}
+
+	}
+
+	if (!hebs_reserve_bytes((void**)&table->names, table->count + 1U, &table->capacity, sizeof(char*)))
+	{
+		*ok = 0;
+		return 0;
+
+	}
+
+	copy = hebs_strdup_local(name);
+	if (!copy)
+	{
+		*ok = 0;
+		return 0;
+
+	}
+
+	table->names[table->count] = copy;
+	*ok = 1;
+	return table->count++;
+
+}
+
+static int hebs_append_primary_input(uint32_t** ids, uint32_t* count, uint32_t* capacity, uint32_t value)
+{
+	if (!hebs_reserve_bytes((void**)ids, *count + 1U, capacity, sizeof(uint32_t)))
+	{
+		return 0;
+
+	}
+
+	(*ids)[*count] = value;
+	++(*count);
+	return 1;
+
+}
+
+static int hebs_append_gate(hebs_gate_raw_t** gates, uint32_t* count, uint32_t* capacity, const hebs_gate_raw_t* gate)
+{
+	if (!hebs_reserve_bytes((void**)gates, *count + 1U, capacity, sizeof(hebs_gate_raw_t)))
+	{
+		return 0;
+
+	}
+
+	(*gates)[*count] = *gate;
+	++(*count);
+	return 1;
+
+}
+
+static int hebs_extract_name_in_parens(const char* text, char* out, size_t out_size)
+{
+	const char* open;
+	const char* close;
+	size_t len;
+
+	if (!text || !out || out_size == 0U)
+	{
+		return 0;
+
+	}
+
+	open = strchr(text, '(');
+	close = strrchr(text, ')');
+	if (!open || !close || close <= open + 1)
+	{
+		return 0;
+
+	}
+
+	len = (size_t)(close - (open + 1));
+	if (len >= out_size)
+	{
+		len = out_size - 1U;
+
+	}
+
+	memcpy(out, open + 1, len);
+	out[len] = '\0';
+	return 1;
+
+}
+
+static hebs_gate_type_t hebs_parse_gate_type(const char* op, uint8_t* input_count, uint8_t* is_stateful)
+{
+	*input_count = 2U;
+	*is_stateful = 0U;
+
+	if (strcmp(op, "AND") == 0)
+	{
+		return HEBS_GATE_AND;
+
+	}
+
+	if (strcmp(op, "OR") == 0)
+	{
+		return HEBS_GATE_OR;
+
+	}
+
+	if (strcmp(op, "NOT") == 0)
+	{
+		*input_count = 1U;
+		return HEBS_GATE_NOT;
+
+	}
+
+	if (strcmp(op, "NAND") == 0)
+	{
+		return HEBS_GATE_NAND;
+
+	}
+
+	if (strcmp(op, "NOR") == 0)
+	{
+		return HEBS_GATE_NOR;
+
+	}
+
+	if (strcmp(op, "DFF") == 0)
+	{
+		*input_count = 1U;
+		*is_stateful = 1U;
+		return HEBS_GATE_BUF;
+
+	}
+
+	if (strcmp(op, "BUF") == 0)
+	{
+		*input_count = 1U;
+		return HEBS_GATE_BUF;
+
+	}
+
+	*input_count = 1U;
+	return HEBS_GATE_BUF;
+
+}
+
+static int hebs_parse_gate_line(
+	char* line,
+	hebs_signal_table_t* signals,
+	hebs_gate_raw_t** gates,
+	uint32_t* gate_count,
+	uint32_t* gate_capacity)
+{
+	char* eq;
+	char* lhs;
+	char* rhs;
+	char* open;
+	char* close;
+	char op[32];
+	char src_a_name[128];
+	char src_b_name[128];
+	char rhs_args[256];
+	char* comma;
+	uint32_t dst_id;
+	uint32_t src_a_id;
+	uint32_t src_b_id;
+	hebs_gate_raw_t gate;
+	int ok;
+	uint8_t input_count;
+	uint8_t is_stateful;
+
+	eq = strchr(line, '=');
+	if (!eq)
+	{
+		return 1;
+
+	}
+
+	*eq = '\0';
+	lhs = hebs_trim(line);
+	rhs = hebs_trim(eq + 1);
+	if (*lhs == '\0' || *rhs == '\0')
+	{
+		return 0;
+
+	}
+
+	open = strchr(rhs, '(');
+	close = strrchr(rhs, ')');
+	if (!open || !close || close <= open)
+	{
+		return 0;
+
+	}
+
+	if ((size_t)(open - rhs) >= sizeof(op))
+	{
+		return 0;
+
+	}
+
+	memcpy(op, rhs, (size_t)(open - rhs));
+	op[open - rhs] = '\0';
+	{
+		char* op_trimmed = hebs_trim(op);
+		memmove(op, op_trimmed, strlen(op_trimmed) + 1U);
+	}
+
+	if ((size_t)(close - (open + 1)) >= sizeof(rhs_args))
+	{
+		return 0;
+
+	}
+
+	memcpy(rhs_args, open + 1, (size_t)(close - (open + 1)));
+	rhs_args[close - (open + 1)] = '\0';
+	comma = strchr(rhs_args, ',');
+
+	memset(&gate, 0, sizeof(gate));
+	gate.type = hebs_parse_gate_type(op, &input_count, &is_stateful);
+	gate.input_count = input_count;
+	gate.is_stateful = is_stateful;
+
+	dst_id = hebs_signal_get_or_add(signals, lhs, &ok);
+	if (!ok)
+	{
+		return 0;
+
+	}
+
+	if (comma)
+	{
+		char* trimmed_a;
+		char* trimmed_b;
+		size_t len_a;
+		size_t len_b;
+
+		*comma = '\0';
+		trimmed_a = hebs_trim(rhs_args);
+		trimmed_b = hebs_trim(comma + 1);
+		len_a = strlen(trimmed_a);
+		len_b = strlen(trimmed_b);
+		if (len_a >= sizeof(src_a_name) || len_b >= sizeof(src_b_name))
+		{
+			return 0;
+
+		}
+
+		memcpy(src_a_name, trimmed_a, len_a + 1U);
+		memcpy(src_b_name, trimmed_b, len_b + 1U);
+	}
+	else
+	{
+		char* trimmed_a = hebs_trim(rhs_args);
+		size_t len_a = strlen(trimmed_a);
+		if (len_a >= sizeof(src_a_name))
+		{
+			return 0;
+
+		}
+
+		memcpy(src_a_name, trimmed_a, len_a + 1U);
+		src_b_name[0] = '\0';
+	}
+
+	src_a_id = hebs_signal_get_or_add(signals, src_a_name, &ok);
+	if (!ok)
+	{
+		return 0;
+
+	}
+
+	src_b_id = src_a_id;
+	if (gate.input_count > 1U)
+	{
+		src_b_id = hebs_signal_get_or_add(signals, src_b_name, &ok);
+		if (!ok)
+		{
+			return 0;
+
+		}
+
+	}
+
+	gate.dst = dst_id;
+	gate.src_a = src_a_id;
+	gate.src_b = src_b_id;
+	return hebs_append_gate(gates, gate_count, gate_capacity, &gate);
+
+}
+
+static int hebs_load_and_parse(
+	const char* file_path,
+	hebs_signal_table_t* signals,
+	uint32_t** primary_inputs,
+	uint32_t* primary_input_count,
+	uint32_t* primary_input_capacity,
+	hebs_gate_raw_t** gates,
+	uint32_t* gate_count,
+	uint32_t* gate_capacity)
+{
+	FILE* bench_file;
+	char line[512];
+
+	bench_file = fopen(file_path, "r");
+	if (!bench_file)
+	{
+		return 0;
+
+	}
+
+	while (fgets(line, (int)sizeof(line), bench_file))
+	{
+		char name[128];
+		char* trimmed;
+		int ok;
+		uint32_t signal_id;
+
+		hebs_strip_comment(line);
+		trimmed = hebs_trim(line);
+		if (*trimmed == '\0')
+		{
+			continue;
+
+		}
+
+		if (strncmp(trimmed, "INPUT(", 6) == 0)
+		{
+			if (!hebs_extract_name_in_parens(trimmed, name, sizeof(name)))
+			{
+				fclose(bench_file);
+				return 0;
+
+			}
+
+			signal_id = hebs_signal_get_or_add(signals, name, &ok);
+			if (!ok || !hebs_append_primary_input(primary_inputs, primary_input_count, primary_input_capacity, signal_id))
+			{
+				fclose(bench_file);
+				return 0;
+
+			}
+
+			continue;
+
+		}
+
+		if (strncmp(trimmed, "OUTPUT(", 7) == 0)
+		{
+			if (!hebs_extract_name_in_parens(trimmed, name, sizeof(name)))
+			{
+				fclose(bench_file);
+				return 0;
+
+			}
+
+			(void)hebs_signal_get_or_add(signals, name, &ok);
+			if (!ok)
+			{
+				fclose(bench_file);
+				return 0;
+
+			}
+
+			continue;
+
+		}
+
+		if (!hebs_parse_gate_line(trimmed, signals, gates, gate_count, gate_capacity))
+		{
+			fclose(bench_file);
+			return 0;
+
+		}
+
+	}
+
+	fclose(bench_file);
+	return 1;
+
+}
+
+static uint32_t hebs_levelize_and_pack(hebs_plan* plan, hebs_gate_raw_t* gates, uint32_t gate_count, uint32_t signal_count)
+{
+	uint32_t* net_levels;
+	uint32_t* fanout_counts;
+	uint32_t pass;
+	uint32_t gate_idx;
+	uint32_t write_idx;
+	uint32_t max_level;
+	uint32_t fanout_max;
+	uint32_t total_fanout_edges;
+	int changed;
+
+	net_levels = (uint32_t*)calloc(signal_count, sizeof(uint32_t));
+	fanout_counts = (uint32_t*)calloc(signal_count, sizeof(uint32_t));
+	if (!net_levels || !fanout_counts)
+	{
+		free(net_levels);
+		free(fanout_counts);
+		return 0;
+
+	}
+
+	fanout_max = 0U;
+	total_fanout_edges = 0U;
+	for (gate_idx = 0; gate_idx < gate_count; ++gate_idx)
+	{
+		++fanout_counts[gates[gate_idx].src_a];
+		++total_fanout_edges;
+		if (fanout_counts[gates[gate_idx].src_a] > fanout_max)
+		{
+			fanout_max = fanout_counts[gates[gate_idx].src_a];
+
+		}
+
+		if (gates[gate_idx].input_count > 1U)
+		{
+			++fanout_counts[gates[gate_idx].src_b];
+			++total_fanout_edges;
+			if (fanout_counts[gates[gate_idx].src_b] > fanout_max)
+			{
+				fanout_max = fanout_counts[gates[gate_idx].src_b];
+
+			}
+
+		}
+
+	}
+
+	for (pass = 0; pass < gate_count + 1U; ++pass)
+	{
+		changed = 0;
+
+		for (gate_idx = 0; gate_idx < gate_count; ++gate_idx)
+		{
+			hebs_gate_raw_t* gate = &gates[gate_idx];
+			uint32_t src_a_level = net_levels[gate->src_a];
+			uint32_t src_b_level = (gate->input_count > 1U) ? net_levels[gate->src_b] : src_a_level;
+			uint32_t gate_level;
+			uint32_t dst_level;
+
+			if (gate->is_stateful)
+			{
+				gate_level = 0U;
+				dst_level = 0U;
+			}
+			else
+			{
+				gate_level = (src_a_level > src_b_level ? src_a_level : src_b_level) + 1U;
+				dst_level = gate_level;
+			}
+
+			gate->level = gate_level;
+			if (dst_level > net_levels[gate->dst])
+			{
+				net_levels[gate->dst] = dst_level;
+				changed = 1;
+
+			}
+
+		}
+
+		if (!changed)
+		{
+			break;
+
+		}
+
+	}
+
+	max_level = 0U;
+	for (gate_idx = 0; gate_idx < gate_count; ++gate_idx)
+	{
+		if (gates[gate_idx].level > max_level)
+		{
+			max_level = gates[gate_idx].level;
+
+		}
+
+	}
+
+	plan->lep_data = (hebs_lep_instruction_t*)calloc(gate_count, sizeof(hebs_lep_instruction_t));
+	if (!plan->lep_data)
+	{
+		free(net_levels);
+		return 0;
+
+	}
+
+	write_idx = 0U;
+	for (pass = 0; pass <= max_level; ++pass)
+	{
+		for (gate_idx = 0; gate_idx < gate_count; ++gate_idx)
+		{
+			if (gates[gate_idx].level == pass)
+			{
+				hebs_lep_instruction_t* instr = &plan->lep_data[write_idx++];
+				instr->gate_type = (uint8_t)gates[gate_idx].type;
+				instr->input_count = gates[gate_idx].input_count;
+				instr->level = (uint16_t)gates[gate_idx].level;
+				instr->src_a_bit_offset = gates[gate_idx].src_a * 2U;
+				instr->src_b_bit_offset = gates[gate_idx].src_b * 2U;
+				instr->dst_bit_offset = gates[gate_idx].dst * 2U;
+
+			}
+
+		}
+
+	}
+
+	plan->gate_count = write_idx;
+	plan->max_level = max_level;
+	plan->level_count = max_level + 1U;
+	plan->propagation_depth = max_level;
+	plan->fanout_max = fanout_max;
+	plan->total_fanout_edges = total_fanout_edges;
+	free(net_levels);
+	free(fanout_counts);
+	return 1;
+
+}
+
+static uint64_t hebs_calculate_lep_hash(const hebs_plan* plan)
+{
+	uint64_t hash;
+	uint32_t idx;
+
+	hash = 1469598103934665603ULL;
+	hash = hebs_hash_mix(hash, plan->signal_count);
+	hash = hebs_hash_mix(hash, plan->gate_count);
+	hash = hebs_hash_mix(hash, plan->num_primary_inputs);
+	hash = hebs_hash_mix(hash, plan->level_count);
+
+	for (idx = 0; idx < plan->gate_count; ++idx)
+	{
+		const hebs_lep_instruction_t* instr = &plan->lep_data[idx];
+		hash = hebs_hash_mix(hash, instr->gate_type);
+		hash = hebs_hash_mix(hash, instr->input_count);
+		hash = hebs_hash_mix(hash, instr->level);
+		hash = hebs_hash_mix(hash, instr->src_a_bit_offset);
+		hash = hebs_hash_mix(hash, instr->src_b_bit_offset);
+		hash = hebs_hash_mix(hash, instr->dst_bit_offset);
+
+	}
+
+	return hash;
+
+}
+
+static void hebs_free_signal_table(hebs_signal_table_t* table)
+{
+	uint32_t idx;
+
+	if (!table)
+	{
+		return;
+
+	}
+
+	for (idx = 0; idx < table->count; ++idx)
+	{
+		free(table->names[idx]);
+
+	}
+
+	free(table->names);
+	table->names = NULL;
+	table->count = 0;
+	table->capacity = 0;
+
+}
+
+hebs_plan* hebs_load_bench(const char* file_path)
+{
+	hebs_plan* plan;
+	hebs_signal_table_t signals;
+	uint32_t* primary_inputs;
+	uint32_t primary_input_count;
+	uint32_t primary_input_capacity;
+	hebs_gate_raw_t* gates;
+	uint32_t gate_count;
+	uint32_t gate_capacity;
+
+	if (!file_path)
+	{
+		return NULL;
+
+	}
+
+	memset(&signals, 0, sizeof(signals));
+	primary_inputs = NULL;
+	primary_input_count = 0U;
+	primary_input_capacity = 0U;
+	gates = NULL;
+	gate_count = 0U;
+	gate_capacity = 0U;
+
+	if (!hebs_load_and_parse(
+		file_path,
+		&signals,
+		&primary_inputs,
+		&primary_input_count,
+		&primary_input_capacity,
+		&gates,
+		&gate_count,
+		&gate_capacity))
+	{
+		hebs_free_signal_table(&signals);
+		free(primary_inputs);
+		free(gates);
+		return NULL;
+
+	}
+
+	plan = (hebs_plan*)calloc(1U, sizeof(hebs_plan));
+	if (!plan)
+	{
+		hebs_free_signal_table(&signals);
+		free(primary_inputs);
+		free(gates);
+		return NULL;
+
+	}
+
+	plan->signal_count = signals.count;
+	plan->num_primary_inputs = primary_input_count;
+	plan->tray_count = (signals.count + 31U) / 32U;
+	plan->gate_count = 0U;
+	plan->primary_input_ids = primary_inputs;
+
+	if (!hebs_levelize_and_pack(plan, gates, gate_count, signals.count))
+	{
+		hebs_free_signal_table(&signals);
+		free(gates);
+		hebs_free_plan(plan);
+		return NULL;
+
+	}
+
+	plan->lep_hash = hebs_calculate_lep_hash(plan);
+	hebs_free_signal_table(&signals);
+	free(gates);
+	return plan;
+
+}
+
+void hebs_free_plan(hebs_plan* plan)
+{
+	if (!plan)
+	{
+		return;
+
+	}
+
+	free(plan->primary_input_ids);
+	free(plan->lep_data);
+	free(plan);
+
+}
