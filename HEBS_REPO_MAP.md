@@ -1,7 +1,7 @@
 # HEBS_REPO_MAP
 
 Status: Active technical reference
-Generated: 2026-03-05
+Generated: 2026-03-06
 Repository Root: `C:\DEV\HEBS_I2`
 Primary Language: C (procedural, data-oriented)
 
@@ -756,16 +756,20 @@ C:\DEV\HEBS_I2
 
 ## 12. Governance Mandates
 
-1. `HEBS_REPO_MAP.md` must be updated in the same approved change whenever new functions, variables, types, constants, files, or directories are added, removed, renamed, or behaviorally changed.
-2. Report artifact naming must use the active revision token as the filename root.
-3. HTML lifecycle is mandatory:
-   - Overwrite HTML per minor revision within the same major revision.
-   - Freeze the last minor revision HTML as that major revision's final HTML.
-   - Never overwrite a prior major revision final HTML from a subsequent revision.
-4. When a directive conflicts with documented requirements, each conflict must be named and approved individually before execution.
-5. Mandatory approval language for each conflict:
+1. Governance and canonical docs remain in repository root (`AGENTS.md`, `HEBS_PLAN.md`, `TAB_PROTOCOL.md`, `HEBS_REPO_MAP.md`) and references should point to those root paths.
+2. `HEBS_REPO_MAP.md` must be updated in the same approved change whenever new functions, variables, types, constants, files, or directories are added, removed, renamed, or behaviorally changed.
+3. Report artifact naming must use the active revision token as the filename root with pattern `<RevisionName>_vNN.html` starting at `v01`.
+4. HTML lifecycle is mandatory and immutable:
+   - each minor run writes a new incremented HTML file;
+   - existing HTML artifacts must never be overwritten or deleted by the runner.
+5. Engine probe constraint is mandatory:
+   - engine may expose raw probes only;
+   - probe APIs may expose raw probe structs only and must not return derived metrics;
+   - benchmark/test metric derivation belongs to tools/runners, not engine internals.
+6. When a directive conflicts with documented requirements, each conflict must be named and approved individually before execution.
+7. Mandatory approval language for each conflict:
    - `This <DeviationName> is not the same as required in documentation. Reply APPROVED <DeviationName> to explicitly confirm and continue.`
-6. ICF definition is locked:
+8. ICF definition is locked:
    - `ICF = internal_node_transitions / primary_input_transitions`
    - any alternate ICF formula is a documented deviation and requires explicit conflict approval.
 

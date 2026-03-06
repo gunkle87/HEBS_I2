@@ -1,5 +1,5 @@
 # HEBS Canonical Testing & Benchmarking Protocol
-Version: 1.2.1
+Version: 1.3.0
 Status: MANDATORY
 Authority: HEBS_SNAPSHOT.md
 
@@ -10,10 +10,10 @@ Authority: HEBS_SNAPSHOT.md
 * **Constraint**: No environment-specific overrides or variant parameters are permitted to prevent results skew.
 
 ## 2. Testing Framework (The Stress Runner)
-* **Scope**: Comprehensive testing of gates, combinational loops, oscillation, and 7-state resolution.
+* **Scope**: Comprehensive testing of gates, combinational loops, oscillation, and canonical operational-state resolution.
 * **Execution**: Triggered at every core code edit to prevent logic regression.
 * **Reporting**: Record results only at the completion of a minor or major revision phase; no intermittent logging.
-* **8-State Integrity**: Mandatory PopCount check for all 8 states (U, X, 0, 1, Z, W, L, H) to ensure no state collapse occurs during optimization.
+* **Operational Collapse Rule**: HEBS remains 8-state capable, but canonical protocol runs treat `SX` and `WX` as `X` unless a future revision explicitly enables strength-aware mode.
 * **Resolution Check**: Verify contention logic (e.g., Strong vs. Weak) matches the resolution matrix.
 
 ## 3. Benchmarking Framework (The Performance Runner)
@@ -47,8 +47,71 @@ Authority: HEBS_SNAPSHOT.md
 
 ## 6. Artifact Naming & HTML Lifecycle (Mandatory)
 * **Revision Token Source**: The active revision name (for example `Revision_Structure_v04`) is the naming root for generated report artifacts.
-* **Naming Rule**: New generated report files must include the active revision token in the filename.
-* **Minor Revision Overwrite Rule**: During a major revision phase, HTML report output for that revision must be overwritten per minor revision iteration.
-* **Final Minor Freeze Rule**: The last minor revision HTML for that major revision is the final HTML artifact and must not be overwritten by any later revision.
-* **Cross-Revision Isolation**: A subsequent major revision must write to a new revision-named HTML file and may not overwrite any prior major revision final HTML.
+* **Naming Rule**: New generated report files must use `<RevisionName>_vNN.html` with minor numbering starting at `v01` for each revision.
+* **Minor Revision Append Rule**: Each minor benchmark run writes a new HTML file and increments `NN`.
+* **Immutability Rule**: Existing HTML files must never be overwritten or deleted by the benchmark runner.
+* **Cross-Revision Isolation**: A subsequent major revision must continue to write new revision-named files and may not modify any prior revision HTML artifact.
+* **Final Minor Metrics Rule**: The final minor code change of a revision must be the revision metrics-point update.
 * **History Rule**: CSV history remains append-only and must continue to carry revision metadata per run header.
+
+## 7. Engine Probe Constraint
+
+The engine may expose **raw probes only**.
+The engine must not compute, derive, aggregate, scan for, or assemble benchmark or test metrics inside the engine.
+
+### Allowed
+
+Raw probe updates at **natural execution points** only.
+
+A **natural execution point** is an already-existing simulation path where the engine is performing required simulation work, and the probe can be updated in **constant cost O(1)** without adding any extra scan, sweep, recomputation, aggregation pass, or control flow introduced solely for testing or benchmarking.
+
+Probe APIs may expose raw probe structs only.
+Probe APIs must not return derived metrics.
+
+Examples:
+
+```c
+ctx->probe_gate_eval++;
+ctx->probe_event_dispatch++;
+ctx->probe_state_write++;
+```
+
+### Forbidden
+
+Any **additional** control flow introduced **solely** for testing, benchmarking, auditing, or reporting, including:
+
+* scan passes
+* sweeps over engine state
+* recomputation of transitions
+* aggregation logic
+* dirty-set construction for metrics
+* metric assembly inside the engine
+
+Examples of forbidden patterns:
+
+```c
+for (...) { ... }          // added only to measure
+if (...) { metric++; }     // added only to classify/count for reporting
+metric += popcount(...);   // derived analysis
+```
+
+### Boundary
+
+* **Engine:** emits facts
+* **Tools / runners / harnesses:** derive conclusions
+
+The engine may report:
+
+* raw counters
+* raw event markers
+* raw state observations already produced by execution
+
+The engine must not report:
+
+* derived benchmark metrics
+* interpreted activity summaries
+* counts that require post-execution reconstruction inside the engine
+
+### Compliance Test
+
+If code exists to measure engine behavior rather than perform simulation behavior, it does not belong in the engine unless it is a raw O(1) probe on an already-existing execution path.

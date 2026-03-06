@@ -49,7 +49,7 @@ Thermal Settle: A 5-second "Warm-up" dummy load is mandatory before measuring to
 
 The Median Rule: All final GEPS (Gates Per Second) and latency metrics must be reported as the Median (p50) of 10 iterations, not the average, to filter out OS-induced jitter.
 
-8-State Integrity: We must implement a PopCount check for all 8 states to prove that no state (like Weak-0 or High-Z) is being accidentally "collapsed" into a simpler state during optimization.
+Operational State Rule: HEBS remains 8-state capable, but canonical protocol runs treat SX and WX as X unless a future revision explicitly enables strength-aware mode.
 
 The Determinism Gate
 Under Section 5 of your protocol, we now have a hard failure condition:
@@ -135,7 +135,7 @@ IDENTIFIER:
 
 
 3. THE HEBS CODE MAP (THE LIVING DIRECTORY)
-This document (stored in docs/CODE_MAP.md) serves as the index for both the 
+This document (tracked with HEBS_REPO_MAP.md in the repository root) serves as the index for both the 
 user and the AI agent.
 
 CORE PILLAR (The Library):
@@ -154,9 +154,17 @@ REPO MAP MAINTENANCE:
 
 REVISION-BASED ARTIFACT NAMING:
     - Generated report artifact names must use the active Revision token.
-    - HTML output for a major Revision is overwritten per minor revision.
-    - The last minor revision HTML is the final HTML for that Revision and must never
-      be overwritten by subsequent Revisions.
+    - HTML output for a major Revision must be append-only with filename pattern:
+      [RevisionName]_vNN.html, starting at v01.
+    - Existing HTML artifacts must never be overwritten or deleted by later runs.
+    - The final minor code change in a Revision is the revision metrics-point update.
+
+ENGINE PROBE CONSTRAINT:
+    - The engine may expose raw probes only.
+    - The engine must not compute, derive, aggregate, scan for, or assemble benchmark
+      or test metrics inside the engine.
+    - Probe APIs may expose raw probe structs only. Probe APIs must not return
+      derived metrics.
 
 DIRECTIVE VS DOCUMENT CONFLICT RULE:
     - If a directive conflicts with documented requirements, each conflict must be named
