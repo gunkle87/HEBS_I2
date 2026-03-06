@@ -773,6 +773,140 @@ static int hebs_index_dff_instructions(hebs_plan* plan)
 
 }
 
+static int hebs_build_comb_execution_plan(hebs_plan* plan)
+{
+	static const uint8_t HEBS_COMB_GATE_ORDER[HEBS_COMB_GATE_TYPE_COUNT] =
+	{
+		(uint8_t)HEBS_GATE_AND,
+		(uint8_t)HEBS_GATE_OR,
+		(uint8_t)HEBS_GATE_NOT,
+		(uint8_t)HEBS_GATE_NAND,
+		(uint8_t)HEBS_GATE_NOR,
+		(uint8_t)HEBS_GATE_BUF
+	};
+	uint32_t level;
+	uint32_t order_idx;
+	uint32_t instr_idx;
+	uint32_t comb_count;
+	uint32_t span_count;
+	uint32_t write_idx;
+	uint32_t span_idx;
+
+	if (!plan || !plan->lep_data)
+	{
+		return 0;
+
+	}
+
+	comb_count = 0U;
+	span_count = 0U;
+	for (level = 0U; level <= plan->max_level; ++level)
+	{
+		for (order_idx = 0U; order_idx < HEBS_COMB_GATE_TYPE_COUNT; ++order_idx)
+		{
+			uint32_t local_count = 0U;
+			for (instr_idx = 0U; instr_idx < plan->gate_count; ++instr_idx)
+			{
+				const hebs_lep_instruction_t* instr = &plan->lep_data[instr_idx];
+				if (instr->level == level && instr->gate_type == HEBS_COMB_GATE_ORDER[order_idx])
+				{
+					++local_count;
+
+				}
+
+			}
+
+			if (local_count > 0U)
+			{
+				comb_count += local_count;
+				++span_count;
+
+			}
+
+		}
+
+	}
+
+	plan->comb_instruction_count = comb_count;
+	plan->comb_span_count = span_count;
+	plan->comb_instruction_indices = NULL;
+	plan->comb_exec_data = NULL;
+	plan->comb_spans = NULL;
+	if (comb_count == 0U || span_count == 0U)
+	{
+		return 1;
+
+	}
+
+	plan->comb_instruction_indices = (uint32_t*)calloc(comb_count, sizeof(uint32_t));
+	plan->comb_exec_data = (hebs_exec_instruction_t*)calloc(comb_count, sizeof(hebs_exec_instruction_t));
+	plan->comb_spans = (hebs_gate_span_t*)calloc(span_count, sizeof(hebs_gate_span_t));
+	if (!plan->comb_instruction_indices || !plan->comb_exec_data || !plan->comb_spans)
+	{
+		free(plan->comb_instruction_indices);
+		free(plan->comb_exec_data);
+		free(plan->comb_spans);
+		plan->comb_instruction_indices = NULL;
+		plan->comb_exec_data = NULL;
+		plan->comb_spans = NULL;
+		plan->comb_instruction_count = 0U;
+		plan->comb_span_count = 0U;
+		return 0;
+
+	}
+
+	write_idx = 0U;
+	span_idx = 0U;
+	for (level = 0U; level <= plan->max_level; ++level)
+	{
+		for (order_idx = 0U; order_idx < HEBS_COMB_GATE_TYPE_COUNT; ++order_idx)
+		{
+			const uint8_t gate_type = HEBS_COMB_GATE_ORDER[order_idx];
+			const uint32_t span_start = write_idx;
+			uint32_t local_count = 0U;
+
+			for (instr_idx = 0U; instr_idx < plan->gate_count; ++instr_idx)
+			{
+				const hebs_lep_instruction_t* instr = &plan->lep_data[instr_idx];
+				hebs_exec_instruction_t* exec_instr;
+				if (instr->level != level || instr->gate_type != gate_type)
+				{
+					continue;
+
+				}
+
+				plan->comb_instruction_indices[write_idx] = instr_idx;
+				exec_instr = &plan->comb_exec_data[write_idx];
+				exec_instr->gate_type = gate_type;
+				exec_instr->src_a_shift = (uint8_t)(instr->src_a_bit_offset % 64U);
+				exec_instr->src_b_shift = (uint8_t)(instr->src_b_bit_offset % 64U);
+				exec_instr->dst_shift = (uint8_t)(instr->dst_bit_offset % 64U);
+				exec_instr->src_a_tray = instr->src_a_bit_offset / 64U;
+				exec_instr->src_b_tray = instr->src_b_bit_offset / 64U;
+				exec_instr->dst_tray = instr->dst_bit_offset / 64U;
+				exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
+				++write_idx;
+				++local_count;
+
+			}
+
+			if (local_count > 0U)
+			{
+				hebs_gate_span_t* span = &plan->comb_spans[span_idx++];
+				span->start = span_start;
+				span->count = local_count;
+				span->gate_type = gate_type;
+
+			}
+
+		}
+
+	}
+
+	return 1;
+
+}
+
 static int hebs_build_internal_transition_mask(hebs_plan* plan)
 {
 	uint8_t* is_primary_input;
@@ -986,6 +1120,16 @@ hebs_plan* hebs_load_bench(const char* file_path)
 
 	}
 
+	if (!hebs_build_comb_execution_plan(plan))
+	{
+		hebs_free_signal_table(&signals);
+		free(primary_outputs);
+		free(gates);
+		hebs_free_plan(plan);
+		return NULL;
+
+	}
+
 	if (!hebs_build_internal_transition_mask(plan))
 	{
 		hebs_free_signal_table(&signals);
@@ -1015,6 +1159,9 @@ void hebs_free_plan(hebs_plan* plan)
 	free(plan->primary_input_ids);
 	free(plan->lep_data);
 	free(plan->dff_instruction_indices);
+	free(plan->comb_instruction_indices);
+	free(plan->comb_exec_data);
+	free(plan->comb_spans);
 	free(plan->internal_transition_lsb_mask);
 	free(plan);
 

@@ -67,73 +67,110 @@ static void hebs_swap_active_trays(hebs_engine* ctx)
 
 }
 
-hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
+typedef uint64_t (*hebs_binary_gate_simd_fn)(uint64_t tray_a, uint64_t tray_b);
+typedef uint64_t (*hebs_unary_gate_simd_fn)(uint64_t tray_a);
+
+static void hebs_execute_binary_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	hebs_binary_gate_simd_fn eval_fn)
 {
-	if (!ctx || !plan)
+	uint32_t idx;
+
+	for (idx = 0U; idx < chunk_count; ++idx)
 	{
-		return HEBS_ERR_LOGIC;
+		const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[chunk_start + idx];
+		const uint64_t a_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t b_lane = (ctx->next_signal_trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+		const uint64_t out_lane = eval_fn(a_lane, b_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = ctx->next_signal_trays[exec_instr->dst_tray];
+		ctx->next_signal_trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
 
 	}
 
-	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS)
-	{
-		return HEBS_ERR_LOGIC;
-
-	}
-
-	if (plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
-	{
-		return HEBS_ERR_LOGIC;
-
-	}
-
-	ctx->current_tick = 0;
-	ctx->tray_count = plan->tray_count;
-	ctx->input_toggle_count = 0;
-	ctx->internal_transition_count = 0;
-	ctx->cycles_executed = 0;
-	ctx->vectors_applied = 0;
-	ctx->gate_evals = 0;
-	ctx->signal_writes_committed = 0;
-	memset(ctx->tray_plane_a, 0, sizeof(ctx->tray_plane_a));
-	memset(ctx->tray_plane_b, 0, sizeof(ctx->tray_plane_b));
-	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
-	ctx->signal_trays = ctx->tray_plane_a;
-	ctx->next_signal_trays = ctx->tray_plane_b;
-	memset(ctx->previous_input_state, 0, sizeof(ctx->previous_input_state));
-	return HEBS_OK;
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
 
 }
 
-void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
+static void hebs_execute_unary_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	hebs_unary_gate_simd_fn eval_fn)
 {
-	uint32_t input_idx;
-	uint32_t instr_idx;
+	uint32_t idx;
 
-	if (!ctx || !plan)
+	for (idx = 0U; idx < chunk_count; ++idx)
 	{
-		return;
+		const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[chunk_start + idx];
+		const uint64_t a_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t out_lane = eval_fn(a_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = ctx->next_signal_trays[exec_instr->dst_tray];
+		ctx->next_signal_trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
 
 	}
 
-	for (input_idx = 0; input_idx < plan->num_primary_inputs && input_idx < HEBS_MAX_PRIMARY_INPUTS; ++input_idx)
-	{
-		uint32_t signal_id = plan->primary_input_ids[input_idx];
-		uint32_t bit_offset = signal_id * 2U;
-		uint8_t current_value = (uint8_t)hebs_read_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset);
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
 
-		if (ctx->previous_input_state[input_idx] != current_value)
+}
+
+static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan* plan)
+{
+	uint32_t span_idx;
+
+	for (span_idx = 0U; span_idx < plan->comb_span_count; ++span_idx)
+	{
+		const hebs_gate_span_t* span = &plan->comb_spans[span_idx];
+		uint32_t processed = 0U;
+		while (processed < span->count)
 		{
-			++ctx->input_toggle_count;
-			ctx->previous_input_state[input_idx] = current_value;
+			const uint32_t chunk_count = ((span->count - processed) > 64U) ? 64U : (span->count - processed);
+			const uint32_t chunk_start = span->start + processed;
+			switch ((hebs_gate_type_t)span->gate_type)
+			{
+				case HEBS_GATE_AND:
+					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_and_simd);
+					break;
+				case HEBS_GATE_OR:
+					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_or_simd);
+					break;
+				case HEBS_GATE_NOT:
+					hebs_execute_unary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_not_simd);
+					break;
+				case HEBS_GATE_NAND:
+					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_nand_simd);
+					break;
+				case HEBS_GATE_NOR:
+					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_nor_simd);
+					break;
+				case HEBS_GATE_BUF:
+					hebs_execute_unary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_buf_simd);
+					break;
+				default:
+					break;
+
+			}
+
+			processed += chunk_count;
 
 		}
 
 	}
 
-	memcpy(ctx->next_signal_trays, ctx->signal_trays, (size_t)ctx->tray_count * sizeof(uint64_t));
+}
 
-	for (instr_idx = 0; instr_idx < plan->gate_count; ++instr_idx)
+static void hebs_execute_combinational_fallback(hebs_engine* ctx, const hebs_plan* plan)
+{
+	uint32_t instr_idx;
+
+	for (instr_idx = 0U; instr_idx < plan->gate_count; ++instr_idx)
 	{
 		const hebs_lep_instruction_t* instr = &plan->lep_data[instr_idx];
 		hebs_logic_t a = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_a_bit_offset);
@@ -182,6 +219,83 @@ void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 		++ctx->gate_evals;
 		hebs_write_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->dst_bit_offset, result);
 		++ctx->signal_writes_committed;
+
+	}
+
+}
+
+hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
+{
+	if (!ctx || !plan)
+	{
+		return HEBS_ERR_LOGIC;
+
+	}
+
+	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS)
+	{
+		return HEBS_ERR_LOGIC;
+
+	}
+
+	if (plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
+	{
+		return HEBS_ERR_LOGIC;
+
+	}
+
+	ctx->current_tick = 0;
+	ctx->tray_count = plan->tray_count;
+	ctx->input_toggle_count = 0;
+	ctx->internal_transition_count = 0;
+	ctx->cycles_executed = 0;
+	ctx->vectors_applied = 0;
+	ctx->gate_evals = 0;
+	ctx->signal_writes_committed = 0;
+	memset(ctx->tray_plane_a, 0, sizeof(ctx->tray_plane_a));
+	memset(ctx->tray_plane_b, 0, sizeof(ctx->tray_plane_b));
+	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
+	ctx->signal_trays = ctx->tray_plane_a;
+	ctx->next_signal_trays = ctx->tray_plane_b;
+	memset(ctx->previous_input_state, 0, sizeof(ctx->previous_input_state));
+	return HEBS_OK;
+
+}
+
+void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
+{
+	uint32_t input_idx;
+
+	if (!ctx || !plan)
+	{
+		return;
+
+	}
+
+	for (input_idx = 0; input_idx < plan->num_primary_inputs && input_idx < HEBS_MAX_PRIMARY_INPUTS; ++input_idx)
+	{
+		uint32_t signal_id = plan->primary_input_ids[input_idx];
+		uint32_t bit_offset = signal_id * 2U;
+		uint8_t current_value = (uint8_t)hebs_read_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset);
+
+		if (ctx->previous_input_state[input_idx] != current_value)
+		{
+			++ctx->input_toggle_count;
+			ctx->previous_input_state[input_idx] = current_value;
+
+		}
+
+	}
+
+	memcpy(ctx->next_signal_trays, ctx->signal_trays, (size_t)ctx->tray_count * sizeof(uint64_t));
+	if (plan->comb_exec_data && plan->comb_spans && plan->comb_span_count > 0U)
+	{
+		hebs_execute_combinational_batched(ctx, plan);
+
+	}
+	else
+	{
+		hebs_execute_combinational_fallback(ctx, plan);
 
 	}
 

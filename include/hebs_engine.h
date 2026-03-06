@@ -38,6 +38,8 @@ typedef enum hebs_gate_type_e
 
 } hebs_gate_type_t;
 
+#define HEBS_COMB_GATE_TYPE_COUNT 6U
+
 typedef struct hebs_lep_instruction_s
 {
 	uint8_t gate_type;
@@ -48,6 +50,30 @@ typedef struct hebs_lep_instruction_s
 	uint32_t dst_bit_offset;
 
 } hebs_lep_instruction_t;
+
+typedef struct hebs_exec_instruction_s
+{
+	uint8_t gate_type;
+	uint8_t src_a_shift;
+	uint8_t src_b_shift;
+	uint8_t dst_shift;
+	uint32_t src_a_tray;
+	uint32_t src_b_tray;
+	uint32_t dst_tray;
+	uint64_t dst_mask;
+
+} hebs_exec_instruction_t;
+
+typedef struct hebs_gate_span_s
+{
+	uint32_t start;
+	uint32_t count;
+	uint8_t gate_type;
+	uint8_t reserved0;
+	uint8_t reserved1;
+	uint8_t reserved2;
+
+} hebs_gate_span_t;
 
 typedef struct hebs_plan_s
 {
@@ -67,6 +93,11 @@ typedef struct hebs_plan_s
 	hebs_lep_instruction_t* lep_data;
 	uint32_t dff_instruction_count;
 	uint32_t* dff_instruction_indices;
+	uint32_t comb_instruction_count;
+	uint32_t* comb_instruction_indices;
+	hebs_exec_instruction_t* comb_exec_data;
+	uint32_t comb_span_count;
+	hebs_gate_span_t* comb_spans;
 	uint64_t* internal_transition_lsb_mask;
 
 } hebs_plan;

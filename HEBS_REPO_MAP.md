@@ -767,3 +767,26 @@ C:\DEV\HEBS_I2
 - AVX2 and AVX-512 primitive libraries are available, but combinational gate evaluation still uses tray-scalar branchless bit-plane math in `core/engine.c`.
 - Storage remains 2-bit tray encoded in the runtime engine; any future expansion of stored logic cardinality requires a storage-format migration plan.
 
+## 14. Rebuild Canon Track (2026-03-05)
+
+### Revision_Combinational_v01 (rebuild)
+
+Engine/data model changes:
+1. Added combinational execution metadata types:
+   - `hebs_exec_instruction_t`
+   - `hebs_gate_span_t`
+2. Added `hebs_plan` execution-plan fields:
+   - `comb_instruction_count`
+   - `comb_instruction_indices`
+   - `comb_exec_data`
+   - `comb_span_count`
+   - `comb_spans`
+3. Loader now precomputes combinational level/type spans and per-gate lane metadata in:
+   - `hebs_build_comb_execution_plan(...)`
+4. `hebs_tick(...)` now dispatches combinational math through 64-gate chunk execution spans:
+   - `hebs_execute_binary_chunk(...)`
+   - `hebs_execute_unary_chunk(...)`
+   - `hebs_execute_combinational_batched(...)`
+5. Fallback scalar combinational path retained:
+   - `hebs_execute_combinational_fallback(...)`
+
