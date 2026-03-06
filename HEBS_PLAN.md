@@ -179,6 +179,45 @@ ICF CANONICAL DEFINITION:
     - Historical ICF values produced with any prior formula are not directly comparable
       to the canonical formula and must be labeled as pre-canonical in reports.
 
+PROBE_FIX_V03 CANON STAGING:
+    - Run 1 token: probe_fix_v03 (canon hardening only, no code changes).
+    - Run 2 token: probe_fix_v03_v01 (core probe profile and gating implementation).
+    - Run 3 token: probe_fix_v03_v02 (benchmark suite output and test suite profile split).
+
+PROBE PROFILE LOCK:
+    - Exactly one profile must be selected at build time:
+      HEBS_PROBE_PROFILE_PERF or HEBS_PROBE_PROFILE_COMPAT.
+    - Default canonical profile is HEBS_PROBE_PROFILE_PERF.
+    - HEBS_COMPAT_PROBES_ENABLED is the derived compatibility switch.
+
+PROBE CLASSIFICATION LOCK FOR V03:
+    - Permanent probes: input_apply, chunk_exec, gate_eval, dff_exec.
+    - Compatibility probes: input_toggle, state_change_commit.
+    - Remove in v03: state_write_attempt.
+    - Deferred out of v03 scope: tray_exec, state_write_commit.
+
+TEST SUITE VS BENCHMARK SUITE LOCK:
+    - Normative requirements must name test suite and benchmark suite explicitly.
+    - Perf profile test suite must not require compatibility probe values.
+    - Compat profile test suite may assert compatibility probes.
+    - Perf profile benchmark suite is canonical.
+    - Compat profile benchmark suite is non-canonical by default.
+
+BENCHMARK OUTPUT LOCK:
+    - Under perf profile, compatibility-derived fields emit numeric 0.
+    - Under compat profile, compatibility-derived fields are computed normally.
+    - Append output columns at row end only:
+      Probe_Profile, Compat_Metrics_Enabled.
+
+CANONICAL ARTIFACT SEPARATION:
+    - Canonical benchmark history: benchmarks/results/metrics_history.csv (perf profile only).
+    - Non-canonical compatibility history: benchmarks/results/metrics_history_compat.csv.
+
+PROBE ACCEPTANCE THRESHOLDS:
+    - Permanent profile retention requires:
+      <= 1.0% median GEPS regression on canonical benchmark suite and
+      <= 2.5% regression on any individual benchmark unless explicitly approved.
+
 
 SRAM KEY TAKEAWAYS:
     1. The "Performance Tank" we are avoiding

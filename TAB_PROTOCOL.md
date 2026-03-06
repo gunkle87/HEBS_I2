@@ -1,5 +1,5 @@
 # HEBS Canonical Testing & Benchmarking Protocol
-Version: 1.3.0
+Version: 1.4.0
 Status: MANDATORY
 Authority: HEBS_SNAPSHOT.md
 
@@ -115,3 +115,36 @@ The engine must not report:
 ### Compliance Test
 
 If code exists to measure engine behavior rather than perform simulation behavior, it does not belong in the engine unless it is a raw O(1) probe on an already-existing execution path.
+
+## 8. Probe Profile Canon (probe_fix_v03)
+* **Build Profiles**:
+    * Exactly one profile must be active at build time: `HEBS_PROBE_PROFILE_PERF` or `HEBS_PROBE_PROFILE_COMPAT`.
+    * Default canonical build profile is `HEBS_PROBE_PROFILE_PERF`.
+    * `HEBS_COMPAT_PROBES_ENABLED` is the derived compatibility switch for runner/test behavior.
+* **Probe Classification**:
+    * **Permanent (all profiles)**: `input_apply`, `chunk_exec`, `gate_eval`, `dff_exec`.
+    * **Compatibility (compat profile only)**: `input_toggle`, `state_change_commit`.
+    * **Removed in v03**: `state_write_attempt`.
+    * **Deferred out of v03**: `tray_exec`, `state_write_commit`.
+* **Benchmark Suite Output Rules**:
+    * Under `HEBS_PROBE_PROFILE_PERF`, compatibility-derived fields must emit numeric `0`.
+    * Under `HEBS_PROBE_PROFILE_COMPAT`, compatibility-derived fields are computed normally.
+    * Benchmark output rows must append (do not reorder existing columns):
+        * `Probe_Profile` (`perf` or `compat`)
+        * `Compat_Metrics_Enabled` (`0` or `1`)
+* **Canonical Artifact Separation**:
+    * Canonical perf-profile benchmark runs append only to `benchmarks/results/metrics_history.csv`.
+    * Compat-profile benchmark runs append only to `benchmarks/results/metrics_history_compat.csv`.
+    * Canonical regression history must contain perf-profile runs only.
+* **Regression Authority**:
+    * Canonical regression gates remain based on GEPS, latency/runtime statistics, and CRC/correctness stability.
+    * Compatibility-derived metrics are informational only and must not gate canonical acceptance.
+* **Suite Terminology Rule**:
+    * Normative language must use explicit terms: `test suite` and `benchmark suite`.
+    * Avoid mixed generic language where required behavior differs between suites.
+* **Test Suite Rules**:
+    * Perf profile test suite: must not require compatibility probe values.
+    * Compat profile test suite: may assert compatibility probe values (`input_toggle`, `state_change_commit`).
+* **Measurement and Acceptance**:
+    * Probe acceptance decisions use median-of-10 on same host/build/inputs/runtime conditions.
+    * A probe may remain permanent only if it causes <=1.0% median GEPS regression and <=2.5% regression on any individual benchmark unless explicitly approved.

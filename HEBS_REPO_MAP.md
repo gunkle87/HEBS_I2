@@ -37,6 +37,7 @@ It covers:
 |---|---|---|
 | `AGENTS.md` | Governance | Agent authorization and execution policy.
 | `HEBS_PLAN.md` | Architecture Plan | High-level architecture, component roles, target structure.
+| `PROBE_FIX.md` | Canon Staging Plan | Probe profile hardening and staged `probe_fix_v03` execution lock.
 | `HighZ_INTEGRATION.md` | Integration Blueprint | Start-to-finish implementation plan for HEBS hybrid zero-delay + timed-event runtime integration.
 | `TAB_PROTOCOL.md` | Canonical Protocol | Mandatory test/benchmark rules and acceptance gates.
 | `Makefile` | Build Orchestration | Build, clean, and verify entry points.
@@ -772,6 +773,15 @@ C:\DEV\HEBS_I2
 8. ICF definition is locked:
    - `ICF = internal_node_transitions / primary_input_transitions`
    - any alternate ICF formula is a documented deviation and requires explicit conflict approval.
+9. Probe profiles are canon-locked for `probe_fix_v03`:
+   - exactly one of `HEBS_PROBE_PROFILE_PERF` or `HEBS_PROBE_PROFILE_COMPAT` must be active;
+   - canonical benchmark history must use perf profile only.
+10. Benchmark suite output schema stability:
+   - new profile metadata columns must append at row end and must not reorder existing canonical columns.
+11. Canonical and compatibility benchmark histories are separated:
+   - canonical: `benchmarks/results/metrics_history.csv`
+   - compatibility-only: `benchmarks/results/metrics_history_compat.csv`
+12. Normative references must explicitly distinguish test suite rules from benchmark suite rules when behavior differs by profile.
 
 ## 13. Known Gaps / Follow-Ups
 
