@@ -1,6 +1,6 @@
 # PROBE_FIX
 
-Status: Canon staging document for `probe_fix_v03`
+Status: Canon staging document for `probe_fix_v03` through `probe_fix_v05`
 Scope: Probe architecture hardening and performance protection
 
 ## 1. Scope
@@ -172,20 +172,20 @@ If a probe exceeds these limits:
 - it must not remain in perf profile
 - it may only be compatibility-only or removed
 
-## 10. Required v03 Execution Order
+## 10. Required v03-v05 Execution Order
 
 Run 1 (`probe_fix_v03`):
 1. harden canon documentation only
 2. no code changes
 3. commit and push
 
-Run 2 (`probe_fix_v03_v01`):
+Run 2 (`probe_fix_v04`):
 1. remove `state_write_attempt`
 2. add centrally enforced probe-profile selection
 3. gate `input_toggle` and `state_change_commit` behind compat profile
 4. commit and push
 
-Run 3 (`probe_fix_v03_v02`):
+Run 3 (`probe_fix_v05`):
 1. append `Probe_Profile` and `Compat_Metrics_Enabled` to benchmark output rows
 2. ensure perf profile emits numeric zero for compatibility-derived metrics
 3. separate canonical vs compat benchmark artifacts
@@ -194,6 +194,10 @@ Run 3 (`probe_fix_v03_v02`):
 6. commit and push
 
 If thresholds are not met after Run 3, further action requires a new approved scope.
+
+Minor revision naming rule:
+- Use flat revision tokens only (`probe_fix_vNN`).
+- Do not use nested suffix forms such as `probe_fix_v03_v01`.
 
 ## 11. Non-Goals
 

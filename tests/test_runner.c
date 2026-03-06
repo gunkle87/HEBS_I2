@@ -23,6 +23,7 @@ static void test_loader_contract_from_s27(void)
 {
 	hebs_plan* plan = hebs_load_bench("benchmarks/benches/ISCAS89/s27.bench");
 	hebs_engine engine = { 0 };
+	hebs_probes probes;
 
 	assert(plan != NULL);
 	assert(plan->lep_hash != 0);
@@ -34,7 +35,12 @@ static void test_loader_contract_from_s27(void)
 	assert(hebs_init_engine(&engine, plan) == HEBS_OK);
 	assert(hebs_set_primary_input(&engine, plan, 0, HEBS_S1) == HEBS_OK);
 	hebs_tick(&engine, plan);
-	assert(engine.input_toggle_count > 0);
+	probes = hebs_get_probes(&engine);
+#if HEBS_COMPAT_PROBES_ENABLED
+	assert(probes.input_toggle > 0);
+#else
+	assert(probes.input_toggle == 0U);
+#endif
 	hebs_free_plan(plan);
 
 }
@@ -134,6 +140,7 @@ static void test_icf_math_assertion(void)
 	hebs_engine engine = { 0 };
 	uint32_t primary_inputs[1] = { 0U };
 	hebs_plan plan = { 0 };
+	hebs_probes probes;
 	uint32_t cycle;
 	double icf;
 
@@ -157,9 +164,14 @@ static void test_icf_math_assertion(void)
 
 	}
 
-	assert(engine.input_toggle_count == 5U);
-	assert(engine.internal_transition_count == 0U);
-	icf = calculate_icf(engine.internal_transition_count, engine.input_toggle_count);
+	probes = hebs_get_probes(&engine);
+#if HEBS_COMPAT_PROBES_ENABLED
+	assert(probes.input_toggle == 5U);
+#else
+	assert(probes.input_toggle == 0U);
+#endif
+	assert(probes.state_change_commit == 0U);
+	icf = calculate_icf(probes.state_change_commit, probes.input_toggle);
 	assert(fabs(icf - 0.0) < 1e-12);
 	icf = calculate_icf(15U, 5U);
 	assert(fabs(icf - 3.0) < 1e-12);

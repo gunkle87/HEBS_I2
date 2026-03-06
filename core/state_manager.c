@@ -6,6 +6,12 @@
 static void hebs_sequential_commit_scalar(hebs_engine* ctx, const hebs_plan* plan)
 {
 	uint32_t instr_idx;
+	uint64_t dff_exec_count = 0U;
+	uint64_t write_commit_count = 0U;
+	uint64_t tray_exec_count = 0U;
+#if HEBS_COMPAT_PROBES_ENABLED
+	uint64_t state_change_count = 0U;
+#endif
 
 	for (instr_idx = 0U; instr_idx < plan->dff_exec_count; ++instr_idx)
 	{
@@ -14,12 +20,25 @@ static void hebs_sequential_commit_scalar(hebs_engine* ctx, const hebs_plan* pla
 		const uint64_t shifted_lane = next_lane << exec_instr->dst_shift;
 		const uint64_t state_tray = ctx->dff_state_trays[exec_instr->dst_tray];
 		const uint64_t signal_tray = ctx->next_signal_trays[exec_instr->dst_tray];
+		const uint64_t new_value = (state_tray & ~exec_instr->dst_mask) | shifted_lane;
 
-		ctx->dff_state_trays[exec_instr->dst_tray] = (state_tray & ~exec_instr->dst_mask) | shifted_lane;
+		++dff_exec_count;
+		ctx->dff_state_trays[exec_instr->dst_tray] = new_value;
 		ctx->next_signal_trays[exec_instr->dst_tray] = (signal_tray & ~exec_instr->dst_mask) | shifted_lane;
-		ctx->signal_writes_committed += 2U;
+		write_commit_count += 2U;
+		tray_exec_count += 2U;
+#if HEBS_COMPAT_PROBES_ENABLED
+		state_change_count += (uint64_t)(new_value != state_tray);
+#endif
 
 	}
+
+	ctx->probe_dff_exec += dff_exec_count;
+	ctx->probe_state_write_commit += write_commit_count;
+	ctx->probe_tray_exec += tray_exec_count;
+#if HEBS_COMPAT_PROBES_ENABLED
+	ctx->probe_state_change_commit += state_change_count;
+#endif
 
 }
 
@@ -28,6 +47,12 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 	uint64_t staged_dff_trays[HEBS_MAX_SIGNAL_TRAYS];
 	uint32_t instr_idx;
 	uint32_t tray_idx;
+	uint64_t dff_exec_count = 0U;
+	uint64_t write_commit_count = 0U;
+	uint64_t tray_exec_count = 0U;
+#if HEBS_COMPAT_PROBES_ENABLED
+	uint64_t state_change_count = 0U;
+#endif
 
 	if (ctx->tray_count > HEBS_MAX_SIGNAL_TRAYS)
 	{
@@ -43,8 +68,14 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 		const uint64_t src_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t shifted_lane = src_lane << exec_instr->dst_shift;
 		const uint64_t tray_value = staged_dff_trays[exec_instr->dst_tray];
-		staged_dff_trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
-		++ctx->signal_writes_committed;
+		const uint64_t new_value = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		++dff_exec_count;
+		++write_commit_count;
+		++tray_exec_count;
+#if HEBS_COMPAT_PROBES_ENABLED
+		state_change_count += (uint64_t)(new_value != tray_value);
+#endif
+		staged_dff_trays[exec_instr->dst_tray] = new_value;
 
 	}
 
@@ -56,12 +87,26 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 		if (commit_mask != 0U)
 		{
 			const uint64_t merged = (ctx->next_signal_trays[tray_idx] & ~commit_mask) | (committed_tray & commit_mask);
+#if HEBS_COMPAT_PROBES_ENABLED
+			const uint64_t old_next = ctx->next_signal_trays[tray_idx];
+#endif
 			ctx->next_signal_trays[tray_idx] = merged;
-			++ctx->signal_writes_committed;
+			++write_commit_count;
+			++tray_exec_count;
+#if HEBS_COMPAT_PROBES_ENABLED
+			state_change_count += (uint64_t)(merged != old_next);
+#endif
 
 		}
 
 	}
+
+	ctx->probe_dff_exec += dff_exec_count;
+	ctx->probe_state_write_commit += write_commit_count;
+	ctx->probe_tray_exec += tray_exec_count;
+#if HEBS_COMPAT_PROBES_ENABLED
+	ctx->probe_state_change_commit += state_change_count;
+#endif
 
 }
 

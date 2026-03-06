@@ -37,7 +37,7 @@ It covers:
 |---|---|---|
 | `AGENTS.md` | Governance | Agent authorization and execution policy.
 | `HEBS_PLAN.md` | Architecture Plan | High-level architecture, component roles, target structure.
-| `PROBE_FIX.md` | Canon Staging Plan | Probe profile hardening and staged `probe_fix_v03` execution lock.
+| `PROBE_FIX.md` | Canon Staging Plan | Probe profile hardening and staged `probe_fix_v03` through `probe_fix_v05` execution lock.
 | `HighZ_INTEGRATION.md` | Integration Blueprint | Start-to-finish implementation plan for HEBS hybrid zero-delay + timed-event runtime integration.
 | `TAB_PROTOCOL.md` | Canonical Protocol | Mandatory test/benchmark rules and acceptance gates.
 | `Makefile` | Build Orchestration | Build, clean, and verify entry points.
@@ -53,7 +53,7 @@ It covers:
 
 | File | Role | Key Symbols |
 |---|---|---|
-| `core/engine.c` | Simulation execution and bit-tray state updates with span-driven 64-gate SIMD batch execution. | `hebs_init_engine`, `hebs_tick_execute` (internal), `hebs_tick_execute_fallback` (internal), `hebs_tick`, `hebs_get_metrics`, `hebs_get_signal_tray`, `hebs_get_state_hash`, `hebs_set_primary_input`, `hebs_get_primary_input` |
+| `core/engine.c` | Simulation execution and bit-tray state updates with span-driven 64-gate SIMD batch execution. | `hebs_init_engine`, `hebs_tick_execute` (internal), `hebs_tick_execute_fallback` (internal), `hebs_tick`, `hebs_get_probes`, `hebs_get_signal_tray`, `hebs_get_state_hash`, `hebs_set_primary_input`, `hebs_get_primary_input` |
 | `core/loader.c` | `.bench` parsing, signal table build, levelization, LEP packing, batch-span precompute, LEP hash. | `hebs_load_bench`, `hebs_levelize_and_pack`, `hebs_build_batch_spans`, `hebs_calculate_lep_hash`, `hebs_free_plan` |
 | `core/primitives.c` | 8-state primitive library with SIMD tray operators and scalar evaluators. | `hebs_gate_and/or/xor/nand/nor/xnor/not/buf`, `hebs_gate_weak_pull/weak_pull_down/strong_pull/vcc/gnd/tristate`, `hebs_eval_*` family |
 | `core/state_manager.c` | Sequential state manager for SIMD/vectorized DFF tray commit. | `hebs_sequential_commit` |
@@ -62,7 +62,8 @@ It covers:
 
 | File | Role | Key Contracts |
 |---|---|---|
-| `include/hebs_engine.h` | Public engine/loader API and core types. | enums, plan/engine/metrics structs, engine+loader+metrics API prototypes |
+| `include/hebs_engine.h` | Public engine/loader API and core types. | enums, plan/engine/probe structs, engine+loader+probe API prototypes |
+| `include/hebs_probe_profile.h` | Probe profile policy | profile-selection macros and compat probe gate |
 | `include/hebs_types.h` | SIMD abstraction type map. | `hebs_vec_t`, `HEBS_VEC_BYTES`, `HEBS_VEC_ALIGN`, `HEBS_VEC_IS_AVX512` |
 | `include/primitives.h` | Primitive logic interface. | SIMD tray operators + scalar primitive evaluators |
 | `include/state_manager.h` | Sequential state manager interface. | `hebs_sequential_commit` |
@@ -190,16 +191,13 @@ It covers:
 - Internal transition mask: `internal_transition_lsb_mask` (LSB-per-node mask for non-PI signals)
 
 #### `hebs_engine` (`include/hebs_engine.h:68`)
-- Runtime counters: `current_tick`, `input_toggle_count`, `internal_transition_count`, `cycles_executed`, `vectors_applied`, `gate_evals`, `signal_writes_committed`
+- Runtime counters: `current_tick`, `cycles_executed`, `vectors_applied`
 - Storage planes: `tray_plane_a`, `tray_plane_b`, `dff_state_trays`
 - Active pointers: `signal_trays`, `next_signal_trays` (zero-copy swap)
-- PI tracking: `previous_input_state[HEBS_MAX_PRIMARY_INPUTS]`
-- SIMD runtime capability flags: `simd_caps`, `avx512_enabled`, `avx2_enabled`
+- Probe counters: `probe_input_apply`, `probe_input_toggle`, `probe_tray_exec`, `probe_chunk_exec`, `probe_gate_eval`, `probe_state_write_commit`, `probe_state_change_commit`, `probe_dff_exec`
 
-#### `hebs_metrics` (`include/hebs_engine.h`)
-- Topology (loader): `gate_count`, `net_count`, `pi_count`, `po_count`, `fanout_avg`, `fanout_max`, `level_depth`
-- Activity (engine): `cycles_executed`, `vectors_applied`, `gate_evals`, `signal_writes_committed`
-- ICF counters: `primary_input_transitions`, `internal_node_transitions`
+#### `hebs_probes` (`include/hebs_engine.h`)
+- Exposed probe snapshot: `input_apply`, `input_toggle`, `tray_exec`, `chunk_exec`, `gate_eval`, `state_write_commit`, `state_change_commit`, `dff_exec`
 
 #### Benchmark data structs
 - `hebs_metric_row_t` (`benchmarks/report_types.h:6`): full benchmark output schema.
@@ -280,15 +278,15 @@ Symbol references: `include/primitives.h`, implementations in `core/primitives.c
 
 ### 6.4 Worth It Probes API
 
-`hebs_get_metrics(const hebs_engine* ctx, const hebs_plan* plan)` returns a high-precision probe snapshot for loader topology, runtime activity, and ICF counters.
+`hebs_get_probes(const hebs_engine* ctx)` returns the raw probe snapshot.
 
 ```c
-hebs_metrics m = hebs_get_metrics(&engine, plan);
+hebs_probes p = hebs_get_probes(&engine);
 printf("GE=%llu SW=%llu ICF_num=%llu ICF_den=%llu\n",
-	(unsigned long long)m.gate_evals,
-	(unsigned long long)m.signal_writes_committed,
-	(unsigned long long)m.internal_node_transitions,
-	(unsigned long long)m.primary_input_transitions);
+	(unsigned long long)p.gate_eval,
+	(unsigned long long)p.state_write_commit,
+	(unsigned long long)p.state_change_commit,
+	(unsigned long long)p.input_toggle);
 ```
 
 Vectorized tray probe path:
@@ -773,7 +771,7 @@ C:\DEV\HEBS_I2
 8. ICF definition is locked:
    - `ICF = internal_node_transitions / primary_input_transitions`
    - any alternate ICF formula is a documented deviation and requires explicit conflict approval.
-9. Probe profiles are canon-locked for `probe_fix_v03`:
+9. Probe profiles are canon-locked for `probe_fix_v03` through `probe_fix_v05`:
    - exactly one of `HEBS_PROBE_PROFILE_PERF` or `HEBS_PROBE_PROFILE_COMPAT` must be active;
    - canonical benchmark history must use perf profile only.
 10. Benchmark suite output schema stability:
@@ -782,6 +780,7 @@ C:\DEV\HEBS_I2
    - canonical: `benchmarks/results/metrics_history.csv`
    - compatibility-only: `benchmarks/results/metrics_history_compat.csv`
 12. Normative references must explicitly distinguish test suite rules from benchmark suite rules when behavior differs by profile.
+13. Probe-fix minor revision naming is flat-token only (`probe_fix_vNN`); nested suffix naming is non-canonical.
 
 ## 13. Known Gaps / Follow-Ups
 

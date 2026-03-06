@@ -1,5 +1,5 @@
 # HEBS Canonical Testing & Benchmarking Protocol
-Version: 1.4.0
+Version: 1.4.1
 Status: MANDATORY
 Authority: HEBS_SNAPSHOT.md
 
@@ -116,7 +116,7 @@ The engine must not report:
 
 If code exists to measure engine behavior rather than perform simulation behavior, it does not belong in the engine unless it is a raw O(1) probe on an already-existing execution path.
 
-## 8. Probe Profile Canon (probe_fix_v03)
+## 8. Probe Profile Canon (probe_fix_v03-v05)
 * **Build Profiles**:
     * Exactly one profile must be active at build time: `HEBS_PROBE_PROFILE_PERF` or `HEBS_PROBE_PROFILE_COMPAT`.
     * Default canonical build profile is `HEBS_PROBE_PROFILE_PERF`.
@@ -148,3 +148,6 @@ If code exists to measure engine behavior rather than perform simulation behavio
 * **Measurement and Acceptance**:
     * Probe acceptance decisions use median-of-10 on same host/build/inputs/runtime conditions.
     * A probe may remain permanent only if it causes <=1.0% median GEPS regression and <=2.5% regression on any individual benchmark unless explicitly approved.
+* **Minor Revision Naming Rule**:
+    * Probe-fix minor revisions must use flat tokens (`probe_fix_vNN`).
+    * Nested suffix tokens (for example `probe_fix_v03_v01`) are non-canonical.

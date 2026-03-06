@@ -2,6 +2,7 @@
 #define HEBS_ENGINE_H
 
 #include <stdint.h>
+#include "hebs_probe_profile.h"
 
 #define HEBS_MAX_PRIMARY_INPUTS 4096
 #define HEBS_MAX_SIGNAL_TRAYS 4096
@@ -121,23 +122,18 @@ typedef struct hebs_plan_s
 
 } hebs_plan;
 
-typedef struct hebs_metrics_s
+typedef struct hebs_probes_s
 {
-	uint32_t gate_count;
-	uint32_t net_count;
-	uint32_t pi_count;
-	uint32_t po_count;
-	double fanout_avg;
-	uint32_t fanout_max;
-	uint32_t level_depth;
-	uint64_t cycles_executed;
-	uint64_t vectors_applied;
-	uint64_t gate_evals;
-	uint64_t signal_writes_committed;
-	uint64_t primary_input_transitions;
-	uint64_t internal_node_transitions;
+	uint64_t input_apply;
+	uint64_t input_toggle;
+	uint64_t tray_exec;
+	uint64_t chunk_exec;
+	uint64_t gate_eval;
+	uint64_t state_write_commit;
+	uint64_t state_change_commit;
+	uint64_t dff_exec;
 
-} hebs_metrics;
+} hebs_probes;
 
 typedef struct hebs_engine_s
 {
@@ -148,13 +144,16 @@ typedef struct hebs_engine_s
 	HEBS_ALIGN64 uint64_t dff_state_trays[HEBS_MAX_SIGNAL_TRAYS];
 	uint64_t* signal_trays;
 	uint64_t* next_signal_trays;
-	uint8_t previous_input_state[HEBS_MAX_PRIMARY_INPUTS];
-	uint64_t input_toggle_count;
-	uint64_t internal_transition_count;
 	uint64_t cycles_executed;
 	uint64_t vectors_applied;
-	uint64_t gate_evals;
-	uint64_t signal_writes_committed;
+	uint64_t probe_input_apply;
+	uint64_t probe_input_toggle;
+	uint64_t probe_tray_exec;
+	uint64_t probe_chunk_exec;
+	uint64_t probe_gate_eval;
+	uint64_t probe_state_write_commit;
+	uint64_t probe_state_change_commit;
+	uint64_t probe_dff_exec;
 
 } hebs_engine;
 
@@ -163,7 +162,7 @@ void hebs_free_plan(hebs_plan* plan);
 
 hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan);
 void hebs_tick(hebs_engine* ctx, hebs_plan* plan);
-hebs_metrics hebs_get_metrics(const hebs_engine* ctx, const hebs_plan* plan);
+hebs_probes hebs_get_probes(const hebs_engine* ctx);
 uint64_t hebs_get_state_hash(hebs_engine* ctx);
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value);
 hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);

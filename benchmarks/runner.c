@@ -524,7 +524,7 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 	double runtimes[ITERATIONS];
 	double geps_runs[ITERATIONS];
 	uint32_t crc_runs[ITERATIONS];
-	hebs_metrics metrics;
+	hebs_probes probes;
 	uint64_t total_toggles;
 	uint64_t total_primary_input_transitions;
 	uint64_t total_internal_transitions;
@@ -589,7 +589,7 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 		runtimes[i] = timer_elapsed_sec(&timer);
 		geps_runs[i] = (runtimes[i] > 0.0) ? (((double)plan->gate_count * (double)SIM_CYCLES) / runtimes[i]) : 0.0;
 		crc_runs[i] = hebs_crc32_signal_trays(&engine);
-		metrics = hebs_get_metrics(&engine, plan);
+		probes = hebs_get_probes(&engine);
 
 		if (i == 0)
 		{
@@ -602,10 +602,10 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 
 		}
 
-		total_toggles += metrics.primary_input_transitions;
-		total_primary_input_transitions += metrics.primary_input_transitions;
-		total_internal_transitions += metrics.internal_node_transitions;
-		total_cycles += (uint32_t)metrics.cycles_executed;
+		total_toggles += probes.input_toggle;
+		total_primary_input_transitions += probes.input_toggle;
+		total_internal_transitions += probes.state_change_commit;
+		total_cycles += (uint32_t)engine.current_tick;
 		printf("Iteration %d: %.9f sec\n", i + 1, runtimes[i]);
 
 		if (i == ITERATIONS - 1)
@@ -613,12 +613,12 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 			char bench_name[128];
 			hebs_strip_extension(hebs_basename_ptr(bench_path), bench_name, sizeof(bench_name));
 			snprintf(out_row->benchmark, sizeof(out_row->benchmark), "%s", bench_name);
-			out_row->pi_count = metrics.pi_count;
+			out_row->pi_count = plan->num_primary_inputs;
 			out_row->cycles = total_cycles;
-			out_row->gate_count = metrics.gate_count;
-			out_row->signal_count = metrics.net_count;
-			out_row->propagation_depth = metrics.level_depth;
-			out_row->fanout_max = metrics.fanout_max;
+			out_row->gate_count = plan->gate_count;
+			out_row->signal_count = plan->signal_count;
+			out_row->propagation_depth = plan->propagation_depth;
+			out_row->fanout_max = plan->fanout_max;
 			out_row->total_fanout_edges = plan->total_fanout_edges;
 			out_row->plan_fingerprint = plan->lep_hash;
 

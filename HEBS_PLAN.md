@@ -181,8 +181,9 @@ ICF CANONICAL DEFINITION:
 
 PROBE_FIX_V03 CANON STAGING:
     - Run 1 token: probe_fix_v03 (canon hardening only, no code changes).
-    - Run 2 token: probe_fix_v03_v01 (core probe profile and gating implementation).
-    - Run 3 token: probe_fix_v03_v02 (benchmark suite output and test suite profile split).
+    - Run 2 token: probe_fix_v04 (core probe profile and gating implementation).
+    - Run 3 token: probe_fix_v05 (benchmark suite output and test suite profile split).
+    - Minor revision naming is flat: probe_fix_vNN only (no nested suffix naming).
 
 PROBE PROFILE LOCK:
     - Exactly one profile must be selected at build time:
