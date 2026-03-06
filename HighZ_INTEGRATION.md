@@ -6,10 +6,10 @@ Owner: HEBS core
 
 ## 1. Purpose
 
-This document describes how to implement a single HEBS engine with two execution modes:
+This document describes how to implement one HEBS loader/plan model with two runtimes:
 
 - Zero-delay waterfall mode (current HEBS behavior)
-- Timed event mode (transport delay, event-driven)
+- Timed event runtime (transport delay, event-driven)
 
 The loader and primitive semantics remain unified so both modes are deterministic and comparable.
 
@@ -102,7 +102,7 @@ Add:
 `hebs_tick()` stays public and valid in both modes:
 
 - zero-delay: one combinational+sequential step
-- timed-event: process events up to next cycle boundary (or one delta horizon if cycle notion is abstract)
+- timed-event: process all events at current `time_ps`, including same-time spawned events across delta cycles, until quiescent at that `time_ps`
 
 ## 6.3 Plan Extensions
 
@@ -178,8 +178,13 @@ Future option: timing wheel if event density justifies.
 
 De-dup rules:
 
-- Use per-gate `(last_enqueued_time_ps, last_enqueued_delta)` stamp to prevent burst duplicates.
-- Allow re-enqueue if a different earlier event key arrives (rare but legal).
+- Dedup is allowed only when all event identity fields match and event is still pending:
+  - same `gate_idx`
+  - same `time_ps`
+  - same `delta_cycle`
+  - same `topo_seq`
+  - same `generation` token
+- Any key mismatch must enqueue as a distinct legal event.
 
 ## 8.4 Transport Delay Semantics
 
@@ -241,10 +246,13 @@ Timed mode must use the same primitive evaluation functions.
 
 ## 12.2 Sequential
 
-For v1:
+For v1, lock this ordering contract:
 
-- Keep DFF commit behavior aligned with current engine cycle semantics.
-- In timed mode, DFF edge-trigger decisions happen when clock net transitions are processed by event runtime.
+1. Resolve all events at current `time_ps` to quiescence.
+2. Detect clock transition edges from resolved net states.
+3. Sample D on edge using the same resolved-state snapshot and tie-break order.
+4. Apply Q updates at the same `time_ps` with deterministic ordering (`time_ps`, `delta_cycle`, `topo_seq`, `gate_idx`).
+5. Only then advance to future `time_ps`.
 
 If needed, add a dedicated timed sequential helper in `core/state_manager.c` later.
 
@@ -256,6 +264,33 @@ Required:
 2. Tie-break key order is fixed and documented.
 3. Queue operations must avoid nondeterministic iteration order.
 4. If all delays are set to zero, timed mode must match zero-delay at defined cycle checkpoints.
+
+## 13.1 Seam Contract (Mandatory)
+
+These definitions are hard requirements before T2:
+
+1. Zero-delay boundary
+- One `hebs_tick()` in zero-delay mode means:
+  - full combinational quiescence
+  - then sequential commit
+
+2. Timed quiescence boundary
+- At a given `time_ps`, timed mode must:
+  - process all events scheduled for `time_ps`
+  - continue processing any new same-time events (`delta_cycle` growth)
+  - stop only when no events remain at that same `time_ps`
+
+3. All-delays-zero parity
+- If every gate delay is `0`, timed mode must match zero-delay mode at:
+  - post-combinational-quiescence / pre-sequential-commit checkpoint
+  - post-sequential-commit checkpoint
+
+4. Deterministic tie-break order
+- Event processing key order is fixed:
+  - `time_ps`
+  - `delta_cycle`
+  - `topo_seq`
+  - `gate_idx`
 
 ## 14. Metrics Additions
 
@@ -352,9 +387,8 @@ Mitigation: explicit documented boundary rule in API and runner.
 ## 18. Open Decisions for Final Plan
 
 1. Delay defaults by gate type (exact ps values)
-2. Timed `hebs_tick()` boundary definition (fixed ps quantum vs until-empty-in-current-time)
-3. Where timed stats are surfaced in runner reports
-4. Whether timed mode gets dedicated benchmark artifacts or combined report sections
+2. Where timed stats are surfaced in runner reports
+3. Whether timed mode gets dedicated benchmark artifacts or combined report sections
 
 ## 19. Recommended Immediate Next Step
 
