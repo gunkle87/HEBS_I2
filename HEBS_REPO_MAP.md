@@ -25,7 +25,7 @@ It covers:
 
 | Canonical Concept Name | Current Implemented Symbol | Reference |
 |---|---|---|
-| `hebs_tick_execute()` | `hebs_tick()` | `core/engine.c:84` |
+| `hebs_tick_execute()` | internal `hebs_tick_execute()` called by public `hebs_tick()` | `core/engine.c` |
 | `hebs_compile_lep()` | `hebs_load_bench()` + internal parse/levelize/pack | `core/loader.c:735`, `core/loader.c:544` |
 | LEP hash generation | `hebs_calculate_lep_hash()` | `core/loader.c:685` |
 
@@ -51,16 +51,17 @@ It covers:
 
 | File | Role | Key Symbols |
 |---|---|---|
-| `core/engine.c` | Simulation execution and bit-tray state updates. | `hebs_init_engine` (`:55`), `hebs_tick` (`:84`), `hebs_get_state_hash` (`:151`), `hebs_set_primary_input` (`:177`), `hebs_get_primary_input` (`:201`) |
-| `core/loader.c` | `.bench` parsing, signal table build, levelization, LEP packing, LEP hash. | `hebs_load_bench` (`:735`), `hebs_levelize_and_pack` (`:544`), `hebs_calculate_lep_hash` (`:685`), `hebs_free_plan` (`:809`) |
+| `core/engine.c` | Simulation execution and bit-tray state updates with span-driven 64-gate SIMD batch execution. | `hebs_init_engine`, `hebs_tick_execute` (internal), `hebs_tick_execute_fallback` (internal), `hebs_tick`, `hebs_get_metrics`, `hebs_get_signal_tray`, `hebs_get_state_hash`, `hebs_set_primary_input`, `hebs_get_primary_input` |
+| `core/loader.c` | `.bench` parsing, signal table build, levelization, LEP packing, batch-span precompute, LEP hash. | `hebs_load_bench`, `hebs_levelize_and_pack`, `hebs_build_batch_spans`, `hebs_calculate_lep_hash`, `hebs_free_plan` |
 | `core/primitives.c` | 8-state primitive library with SIMD tray operators and scalar evaluators. | `hebs_gate_and/or/xor/nand/nor/xnor/not/buf`, `hebs_gate_weak_pull/strong_pull/vcc/gnd/tristate`, `hebs_eval_*` family |
-| `core/state_manager.c` | Sequential state manager for parallel DFF tray commit. | `hebs_sequential_commit` |
+| `core/state_manager.c` | Sequential state manager for SIMD/vectorized DFF tray commit. | `hebs_sequential_commit` |
 
 ### 3.3 `/include` (Public API Headers)
 
 | File | Role | Key Contracts |
 |---|---|---|
 | `include/hebs_engine.h` | Public engine/loader API and core types. | enums, plan/engine/metrics structs, engine+loader+metrics API prototypes |
+| `include/hebs_types.h` | SIMD abstraction type map. | `hebs_vec_t`, `HEBS_VEC_BYTES`, `HEBS_VEC_ALIGN`, `HEBS_VEC_IS_AVX512` |
 | `include/primitives.h` | Primitive logic interface. | SIMD tray operators + scalar primitive evaluators |
 | `include/state_manager.h` | Sequential state manager interface. | `hebs_sequential_commit` |
 
@@ -68,24 +69,35 @@ It covers:
 
 | File | Role | Key Symbols |
 |---|---|---|
-| `benchmarks/runner.c` | Benchmark executor, warmup, 10-iteration protocol, CSV/HTML output. | runner constants (`:15-22`), `hebs_run_single_bench` (`:309`), `main` (`:433`) |
+| `benchmarks/runner.c` | Benchmark executor, warmup, 10-iteration protocol, CSV/HTML output. | runner constants (`REVISION_NAME=Revision_Optimized_v03`, `ANCHOR_REVISION_TOKEN=Revision_Structure_v07`, `C6288_CRC_LOCK=0x90B28CB8`), fixed 10-bench anchor target list, `hebs_run_single_bench`, `main` |
 | `benchmarks/protocol_helper.h` | Statistical helpers (median/percentiles/ICF). | `calculate_p50`, `calculate_percentile`, `calculate_icf` |
 | `benchmarks/report_types.h` | Metric row schema. | `hebs_metric_row_s` (`:6`) |
 | `benchmarks/timing_helper.h` | High-resolution timer wrapper. | `hebs_timer_s` (`:6`) |
 | `benchmarks/html_report.h` | HTML report emitter. | `generate_master_report` (`:18`) |
-| `benchmarks/csv_export.h` | CSV parse/history lookup/append. | `lookup_history_for_bench_suite` (`:129`), `append_metrics_history_csv` (`:217`) |
+| `benchmarks/csv_export.h` | CSV parse/history lookup/append. | `lookup_history_for_bench_suite`, `lookup_revision_mean_geps`, `append_metrics_history_csv` |
 | `benchmarks/benches/ISCAS85/c17.bench` | Benchmark netlist | ISCAS85 sample |
 | `benchmarks/benches/ISCAS85/c432.bench` | Benchmark netlist | ISCAS85 sample |
 | `benchmarks/benches/ISCAS85/c499.bench` | Benchmark netlist | ISCAS85 sample |
 | `benchmarks/benches/ISCAS85/c6288.bench` | Benchmark netlist | ISCAS85 sample |
+| `benchmarks/benches/ISCAS85/c7552.bench` | Benchmark netlist | ISCAS85 sample |
 | `benchmarks/benches/ISCAS85/c880.bench` | Benchmark netlist | ISCAS85 sample |
 | `benchmarks/benches/ISCAS89/s27.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/benches/ISCAS89/s298.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/benches/ISCAS89/s382.bench` | Benchmark netlist | ISCAS89 sample |
+| `benchmarks/benches/ISCAS89/s38584.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/benches/ISCAS89/s526.bench` | Benchmark netlist | ISCAS89 sample |
+| `benchmarks/benches/ISCAS89/s5378.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/benches/ISCAS89/s820.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/results/metrics_history.csv` | Historical metric ledger | revision blocks + per-bench rows |
-| `benchmarks/results/revision_structure.html` | HTML benchmark report | latest runner report |
+| `benchmarks/results/revision_structure.html` | HTML benchmark report | legacy Revision_Structure artifact |
+| `benchmarks/results/revision_combinational_v01.html` | HTML benchmark report | prior combinational artifact |
+| `benchmarks/results/revision_combinational_v02.html` | HTML benchmark report | prior combinational artifact |
+| `benchmarks/results/revision_combinational_v03.html` | HTML benchmark report | prior combinational artifact |
+| `benchmarks/results/revision_combinational_v04.html` | HTML benchmark report | prior combinational artifact |
+| `benchmarks/results/revision_combinational_v05.html` | HTML benchmark report | prior combinational artifact |
+| `benchmarks/results/revision_optimized_v01.html` | HTML benchmark report | prior optimized artifact |
+| `benchmarks/results/revision_optimized_v02.html` | HTML benchmark report | prior optimized artifact |
+| `benchmarks/results/revision_optimized_v03.html` | HTML benchmark report | active optimized artifact |
 
 ### 3.5 `/tests`
 
@@ -155,10 +167,15 @@ It covers:
 - `gate_type`, `input_count`, `level`
 - `src_a_bit_offset`, `src_b_bit_offset`, `dst_bit_offset`
 
+#### `hebs_batch_span_t` (`include/hebs_engine.h`)
+- `start_index`, `count`, `gate_type`, `level`
+- precomputed contiguous LEP run metadata used by `hebs_tick_execute()`
+
 #### `hebs_plan` (`include/hebs_engine.h:51`)
 - Metadata: `lep_hash`, `level_count`, `signal_count`, `gate_count`, `tray_count`, `propagation_depth`, `fanout_avg`, `fanout_max`
 - IO counts: `num_primary_inputs`, `num_primary_outputs`
-- Buffers: `primary_input_ids`, `lep_data`
+- Buffers: `primary_input_ids`, `lep_data`, `batch_spans`
+- Batch span index: `batch_span_count`
 - Sequential index: `dff_instruction_count`, `dff_instruction_indices`
 - Internal transition mask: `internal_transition_lsb_mask` (LSB-per-node mask for non-PI signals)
 
@@ -167,6 +184,7 @@ It covers:
 - Storage planes: `tray_plane_a`, `tray_plane_b`, `dff_state_trays`
 - Active pointers: `signal_trays`, `next_signal_trays` (zero-copy swap)
 - PI tracking: `previous_input_state[HEBS_MAX_PRIMARY_INPUTS]`
+- SIMD runtime capability flags: `simd_caps`, `avx512_enabled`, `avx2_enabled`
 
 #### `hebs_metrics` (`include/hebs_engine.h`)
 - Topology (loader): `gate_count`, `net_count`, `pi_count`, `po_count`, `fanout_avg`, `fanout_max`, `level_depth`
@@ -182,15 +200,19 @@ It covers:
 #### Core/API limits (`include/hebs_engine.h`)
 - `HEBS_MAX_PRIMARY_INPUTS = 4096` (`:6`)
 - `HEBS_MAX_SIGNAL_TRAYS = 4096` (`:7`)
+- `HEBS_BATCH_GATE_COUNT = 64` default, compile-time override supported (`:8-10`)
 
-#### Runner protocol constants (`benchmarks/runner.c:15-22`)
+#### Runner protocol constants (`benchmarks/runner.c`)
 - `ITERATIONS = 10`
 - `WARMUP_SECONDS = 5.0`
-- `SIM_CYCLES = 100`
+- `SIM_CYCLES = 2000`
 - `BENCH_ROOT = "benchmarks/benches/"`
-- `REVISION_NAME = "Revision_Structure_v07"`
+- `REVISION_NAME = "Revision_Optimized_v03"`
+- `ANCHOR_REVISION_TOKEN = "Revision_Structure_v07"`
 - `METRICS_CSV_PATH = "benchmarks/results/metrics_history.csv"`
-- `REPORT_HTML_PATH = "benchmarks/results/revision_structure_v07.html"`
+- `REPORT_HTML_PATH = "benchmarks/results/revision_optimized_v03.html"`
+- `C6288_CRC_LOCK = 0x90B28CB8`
+- fixed target set (10 benches): `c17,c432,c499,c6288,c880,s27,s298,s382,s526,s820`
 
 ## 6. Public API Usage Language
 
@@ -259,25 +281,95 @@ printf("GE=%llu SW=%llu ICF_num=%llu ICF_den=%llu\n",
 	(unsigned long long)m.primary_input_transitions);
 ```
 
+Vectorized tray probe path:
+- `const uint64_t* hebs_get_signal_tray(const hebs_engine* ctx, uint32_t tray_index)`
+- Returns a direct pointer to the active 64-bit tray so callers can sample packed multi-signal state in one read.
+- Runner integration: tray-level CRC fingerprinting now reads trays through this API instead of direct struct pointer access.
+
 ## 7. Simulation Data Layout Notes
 
 - Logic states are packed as 2-bit values inside 64-bit trays.
 - Signal ID to bit offset mapping: `bit_offset = signal_id * 2`.
 - Tray addressing in engine: `tray_index = bit_offset / 64`, `bit_position = bit_offset % 64`.
-- Read/write helpers: `hebs_read_logic_at_offset` and `hebs_write_logic_at_offset` (`core/engine.c:5`, `core/engine.c:30`).
+- Read/write helpers:
+  - Checked path: `hebs_read_logic_at_offset`, `hebs_write_logic_at_offset`.
+  - Hot-loop path: `hebs_read_logic_u32_fast`, `hebs_write_logic_u32_fast`.
 
-### 7.1 Parallel DFF Tray Architecture
+### 7.1 SIMD Batch Executor (Revision_Optimized_v03)
 
-- DFF state is maintained in bit-packed `uint64_t` trays (`dff_state_trays`), not a scalar byte-array model.
-- DFF instructions are pre-indexed in the compiled plan (`dff_instruction_count`, `dff_instruction_indices`) so sequential commit does not scan all gates each tick.
-- Per tick flow:
-  - Combinational writes go to `next_signal_trays`.
-  - `hebs_sequential_commit` copies DFF source nodes from `next_signal_trays` into `dff_state_trays`.
-  - The same committed value is written to the DFF destination in `next_signal_trays`.
-  - Engine performs a zero-copy pointer swap (`signal_trays <-> next_signal_trays`) for the next tick.
-- Deviation note: this intentionally replaces old byte-array DFF handling. Future agents must not revert to scalar per-node DFF state storage.
+- Core hot loop now executes combinational work in level-bounded batches up to 64 LEP instructions per pass.
+- Batch runs are precomputed once in the loader (`hebs_build_batch_spans`) and consumed directly in the tick path.
+- Gate evaluation is batch-specialized and branchless within each gate-family lane loop.
+- Binary fast path uses direct bit-plane math (2-bit packed values) and LUT fallback preserves 8-state correctness.
+- Loop throughput tuning in hot path:
+  - local register masks for bit extraction and binary-state checks,
+  - explicit `#pragma GCC unroll 4` hints on batch loops,
+  - 64-byte alignment on tray storage arrays in `hebs_engine`.
+- Compatibility fallback remains in engine for ad hoc plans that do not carry `batch_spans` (for tests and API safety).
+- DFF instructions are preserved via destination-value masks in the batch stage, then canonical sequential behavior is finalized by `hebs_sequential_commit`.
+- Zero-copy tray swap remains unchanged (`signal_trays <-> next_signal_trays`) after sequential commit.
+- Combinational waterfall now has an AVX2 vector path in `core/engine.c` for gate-family spans (`AND/OR/NOT/NAND/NOR/BUF`):
+  - processes four 64-bit trays per vector step (`__m256i`),
+  - keeps vector math in YMM registers from vector load to vector blend before destination commit,
+  - uses a span-width gate (`batch_count >= 64`) to avoid small-span setup tax and preserve throughput stability.
+- Scalar path remains as compatibility fallback for narrow spans and unsupported conditions.
 
-### 7.2 ICF Canonical Formula Lock
+### 7.2 SIMD Sequential DFF Commit (Revision_Optimized_v02)
+
+- DFF state is maintained in bit-packed `uint64_t` trays (`dff_state_trays`).
+- Commit path consumes precomputed execution metadata:
+  - batch spans (`batch_spans`) for loader-generated plans,
+  - fallback DFF index/gate scans only for ad hoc plans.
+- Adaptive commit selector:
+  - if DFF count `< 64`, use lean scalar commit path,
+  - otherwise use tray-vectorized commit path.
+- Commit flow per tick:
+  - gather DFF source values from `next_signal_trays` into tray-local pending masks/values,
+  - commit tray-wise writes to `dff_state_trays` and mirrored destinations in `next_signal_trays`,
+  - accumulate `internal_transition_count` from tray deltas via `__builtin_popcountll(old_tray ^ new_tray)`.
+- AVX2 active path for non-trivial DFF sets:
+  - tray commit uses `_mm256_store_si256` on 32-byte aligned tray blocks,
+  - transition counting uses vectorized SAD popcount (`_mm256_sad_epu8`) over byte popcount vectors.
+- This keeps DFF commit deterministic with the zero-copy tray swap model while lifting wide sequential throughput on AVX2 hosts.
+
+### 7.3 Multi-Tier SIMD Architecture Notes
+
+- Boot-time feature detection is performed in `core/engine.c` and tracks:
+  - `AVX2`
+  - `AVX512F`
+  - `AVX512BW`
+  - `AVX512DQ`
+  - `AVX512VPOPCNTDQ`
+- Runtime behavior:
+  - all AVX-512 required extensions present -> AVX-512 sequential path is enabled,
+  - AVX-512 missing but AVX2 present -> AVX2 high-tier path is enabled,
+  - AVX2 missing -> fallback to v05 optimized 64-bit path.
+- Runner logs active mode and missing-extension cause explicitly.
+
+### 7.4 YMM Usage Map (AVX2 Sequential Commit)
+
+- `YMM mask_vec`: pending DFF destination mask (4 x 64-bit trays).
+- `YMM old_dff_vec`: previous `dff_state_trays` block.
+- `YMM pending_vec`: collected next-state values for DFF destinations.
+- `YMM new_dff_vec`: merged committed DFF tray values.
+- `YMM delta_vec`: `old_dff_vec ^ new_dff_vec` masked for transition accounting.
+- `YMM byte_counts`: nibble-LUT expanded byte popcount vector.
+- `YMM sad`: byte-count accumulation via `_mm256_sad_epu8`.
+- `YMM next_vec` / `new_next_vec`: merged `next_signal_trays` block committed via `_mm256_store_si256`.
+
+### 7.5 ZMM Usage Map
+
+- `ZMM mask_vec`: pending DFF destination mask (8 x 64-bit trays).
+- `ZMM old_dff_vec`: previous `dff_state_trays` block.
+- `ZMM pending_vec`: collected next-state values for DFF destinations.
+- `ZMM new_dff_vec`: merged committed DFF tray values.
+- `ZMM delta_vec`: `old_dff_vec ^ new_dff_vec` masked for transition accounting.
+- `ZMM pop_vec`: `_mm512_popcnt_epi64(delta_vec)` transition counts.
+- `ZMM next_vec` / `new_next_vec`: merged `next_signal_trays` block committed via `_mm512_store_si512`.
+- Primitive ZMM library in `core/primitives.c` includes double-plane `AND`, `NAND`, `XOR`, and `TriSTATE`.
+- Primitive AVX2 library in `core/primitives.c` includes double-plane `AND`, `OR`, `NAND`, `XOR`, and `TriSTATE`.
+
+### 7.6 ICF Canonical Formula Lock
 
 - Canonical formula:
   - `ICF = internal_node_transitions / primary_input_transitions`
@@ -303,7 +395,7 @@ make
 ```
 
 Makefile include path now uses root include directory:
-- `CFLAGS = -Iinclude ...` (`Makefile`)
+- `CFLAGS = -Iinclude -O3 -mavx2 -march=native ...` (`Makefile`)
 
 ### 8.2 Test
 
@@ -381,6 +473,242 @@ Interpretation:
 - Sequential benchmark fingerprints changed due DFF commit-path behavior change.
 - Throughput is currently below prior v04 baselines and requires optimization work.
 
+### 10.3 Revision_Combinational_v01 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Combinational_v01 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+`c6288` validation row:
+- `GEPS_p50 = 183943051.01`
+- `Logic_CRC32 = 0x90B28CB8`
+- `Fingerprint_Stable = 1`
+- `Regression_Gate = PASS`
+
+Interpretation:
+- `c6288` throughput exceeds the 182M GEPS target gate.
+- Logic fingerprint remains locked to the established baseline CRC32.
+
+### 10.4 Delta Anchor Rule (Current)
+
+- `Prev_GEPS` and `Prev_ICF` are now anchored to the latest available metrics from prior revisions only.
+- Rows from the active revision token are excluded from the `Prev_*` anchor to prevent same-revision self-comparison drift.
+- `Base_GEPS` for `Revision_Combinational*` runs is now anchored to the mean GEPS of token `Revision_Structure_v07` when that token exists in the ledger.
+- Implementation anchors:
+  - `benchmarks/csv_export.h`: `lookup_history_for_bench_suite(...)`
+  - `benchmarks/csv_export.h`: `lookup_revision_mean_geps(...)`
+  - `benchmarks/runner.c`: history lookup call with `REVISION_NAME` and `ANCHOR_REVISION_TOKEN`
+
+### 10.5 Revision_Combinational_v02 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Combinational_v02 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+`c6288` validation row:
+- `GEPS_p50 = 268220927.83`
+- `Logic_CRC32 = 0x90B28CB8`
+- `Fingerprint_Stable = 1`
+
+Hot path profile summary (`c6288` microprofile):
+- Pre-optimization:
+  - batch overhead: `2.551 ns/op`
+  - NAND math: `1.892 ns/op`
+  - XOR math: `1.921 ns/op`
+- Post-optimization:
+  - batch overhead: `2.205 ns/op`
+  - NAND math: `1.919 ns/op`
+  - XOR math: `1.911 ns/op`
+- Interpretation:
+  - dominant cost source is batch loop overhead, not primitive NAND/XOR math.
+  - alignment and loop-overhead reduction improved executor throughput while preserving CRC determinism.
+
+### 10.6 Revision_Combinational_v03 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Combinational_v03 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+Global mean GEPS:
+- `242589192.16` (`+32.76%` vs v07 anchor)
+
+`c6288` validation row:
+- `GEPS_p50 = 327172212.21`
+- `Logic_CRC32 = 0x90B28CB8`
+- `Fingerprint_Stable = 1`
+
+Batch-size audit (`c6288` probe, p50 GEPS):
+- `batch=32` -> `312710328.76`
+- `batch=64` -> `328752211.19` (selected)
+- `batch=96` -> `328573371.41`
+- `batch=128` -> `327682083.28`
+- CRC lock preserved (`0x90B28CB8`) across all tested sizes.
+
+Secondary hot-path profile (`c6288`, v03):
+- `overhead_ns_per_span = 3.817`
+- `overhead_ns_per_gate_equiv = 0.250`
+- `nand_ns_per_op = 2.103`
+- `xor_ns_per_op = 1.664`
+- overhead share vs NAND (`gate-equivalent basis`) = `10.61%`
+
+Interpretation:
+- precomputed batch spans removed most setup overhead from the tick hot path.
+- overhead share dropped below the 50% target while maintaining deterministic CRC32 output.
+
+### 10.7 Revision_Combinational_v04 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Combinational_v04 | 14:05:51 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+Global mean GEPS:
+- `232215599.71` (`+27.08%` vs v07 anchor)
+
+`c6288` determinism gate:
+- `GEPS_p50 = 325102605.25`
+- `Logic_CRC32 = 0x90B28CB8`
+- `Fingerprint_Stable = 1`
+
+Sequential focus checks:
+- `s298`:
+  - `GEPS_p50 = 251180582.80`
+  - delta vs latest v03 (`285407725.32`) = `-11.99%`
+  - `Logic_CRC32 = 0x945FC7DE`
+- `s5378`:
+  - `GEPS_p50 = 385759103.41`
+  - first tracked baseline appears in v04 ledger; nearest prior row delta (`v04-to-v04`) = `-0.01%`
+  - `Logic_CRC32 = 0x8E95C42D`
+
+Interpretation:
+- SIMD sequential commit preserves determinism fingerprints.
+- throughput impact is benchmark-dependent and currently negative on several small/medium benches relative to v03.
+
+### 10.8 Revision_Combinational_v05 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Combinational_v05 | 14:18:32 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+Global mean GEPS:
+- Full discovered suite (`13` benches, includes `s5378`): `265074344.93` (`+45.07%` vs v07 anchor)
+- Titan-target suite (`12` benches = original 10 + `c7552` + `s38584`): `255057064.67` (`+39.58%` vs v07 anchor)
+
+Titan table (p50 GEPS / CRC32):
+- `c6288`: `321297960.06` / `0x90B28CB8`
+- `c7552`: `238741134.88` / `0x4551B972`
+- `s5378`: `385281708.06` / `0x8E95C42D`
+- `s38584`: `420937996.87` / `0x99D32148`
+
+Sequential stabilization check:
+- `s298` moved from v04 `251180582.80` to v05 `295555555.56` (`+17.67%` vs v04), which resolves the v04 regression against the v03 baseline.
+
+Protocol gate note:
+- suite run still flagged one regression gate (`c880`, `-2.79%` vs previous row) even though Titan/global objectives were met.
+
+Determinism gate:
+- `c6288` CRC remains locked at `0x90B28CB8`.
+- `s5378` CRC remains locked at `0x8E95C42D`.
+
+### 10.9 Revision_Optimized_v01 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Optimized_v01 | 14:42:22 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+AVX-512 availability:
+- Runtime reported missing extensions: `AVX512F AVX512BW AVX512DQ AVX512VPOPCNTDQ`
+- Execution used fallback v05 optimized 64-bit path.
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+Global mean GEPS (full discovered suite, 13 benches):
+- `265418633.52` (`+45.25%` vs v07 anchor)
+
+Titan table (p50 GEPS / CRC32):
+- `c6288`: `322305596.56` / `0x90B28CB8`
+- `c7552`: `237522088.89` / `0x4551B972`
+- `s5378`: `383956392.76` / `0x8E95C42D`
+- `s38584`: `422209993.12` / `0x99D32148`
+
+Performance objective check:
+- `s38584` peak target `>500M GEPS` was not met on this host in fallback mode (`422.21M` p50).
+
+### 10.10 Revision_Optimized_v02 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Optimized_v02 | 15:07:27 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+SIMD mode:
+- Runtime mode: `AVX2 active`
+- Missing extensions reported: `AVX512F AVX512BW AVX512DQ AVX512VPOPCNTDQ`
+- Fallback path: AVX2 high-tier path selected (not v05 scalar fallback).
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+Global mean GEPS (full discovered suite, 13 benches):
+- `262517468.10` (`+43.67%` vs v07 anchor)
+
+Titan table (p50 GEPS / CRC32):
+- `c6288`: `321426197.13` / `0x90B28CB8`
+- `c7552`: `235610128.01` / `0x4551B972`
+- `s5378`: `383483504.56` / `0x8E95C42D`
+- `s38584`: `413934950.21` / `0x99D32148`
+
+Determinism hard gate:
+- c6288 hard-stop lock implemented in runner with required CRC32 `0x90B28CB8`.
+- Latest run passed lock and completed all 13 benches; regression gates tripped on `s27` and `s526` (`failed=2`).
+
+Direct v05 (64-bit) vs v02 (AVX2) comparison:
+- v05 global mean (13 benches): `265074344.93`
+- v02 global mean (13 benches): `262517468.10`
+- absolute delta: `-2556876.83 GEPS`
+- relative delta: `-0.96%` global mean
+- per-bench mean delta (v02 vs v05): `-1.04%`
+
+### 10.11 Revision_Optimized_v03 Validation Snapshot
+
+Latest runner block header:
+- `Revision_Optimized_v03 | 15:22:10 | 2026-03-05` (latest appended run in `metrics_history.csv`)
+
+Baseline scope:
+- Protocol temporarily reverted to the original 10-bench anchor set from `Revision_Structure_v07`.
+- Excluded from v03 protocol run: `c7552`, `s5378`, `s38584`.
+
+SIMD mode:
+- Runtime mode: `AVX2 active`
+- Missing extensions reported: `AVX512F AVX512BW AVX512DQ AVX512VPOPCNTDQ`
+- Compile flags remain enforced: `-mavx2 -march=native` (`Makefile`).
+
+Global anchor:
+- Anchor token: `Revision_Structure_v07`
+- Anchor mean GEPS: `182726469.90`
+
+10-bench global mean GEPS:
+- `231727360.94`
+- Architecture Gain vs v07 anchor: `+26.82%`
+
+c6288 determinism gate:
+- `GEPS_p50 = 295407097.79`
+- `Logic_CRC32 = 0x90B28CB8` (hard-stop lock preserved)
+
+Protocol result:
+- Run completed all 10 benches with CRC lock intact.
+- Regression gate counters still tripped on several benches versus immediate previous-row history due the new 2000-cycle protocol and waterfall path.
+
 ## 11. Structural Normalization Ledger
 
 Executed normalization changes:
@@ -400,6 +728,7 @@ C:\DEV\HEBS_I2
 |   `-- state_manager.c
 |-- include/
 |   |-- hebs_engine.h
+|   |-- hebs_types.h
 |   |-- primitives.h
 |   `-- state_manager.h
 |-- benchmarks/
@@ -435,6 +764,6 @@ C:\DEV\HEBS_I2
 
 - `HEBS_PLAN.md` still describes conceptual paths/names that do not exactly match current symbol names.
 - If strict canonical naming is required, a dedicated alignment pass should map or rename exported APIs deliberately.
-- Parallel DFF Tray architecture introduced measurable GEPS regression in current runs; hot-path optimization is required to recover throughput.
-- Extended primitive functions are implemented in `primitives.c`, but the current gate parser/dispatcher still actively routes LEP execution through `AND/OR/NOT/NAND/NOR/BUF/DFF` gate types.
+- AVX2 and AVX-512 primitive libraries are available, but combinational gate evaluation still uses tray-scalar branchless bit-plane math in `core/engine.c`.
+- Storage remains 2-bit tray encoded in the runtime engine; any future expansion of stored logic cardinality requires a storage-format migration plan.
 

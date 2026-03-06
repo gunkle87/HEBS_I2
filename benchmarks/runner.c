@@ -14,12 +14,41 @@
 
 #define ITERATIONS 10
 #define WARMUP_SECONDS 5.0
-#define SIM_CYCLES 100
+#ifndef SIM_CYCLES
+#define SIM_CYCLES 1000
+#endif
 #define BENCH_ROOT "benchmarks/benches/"
 #define MAX_BENCH_RESULTS 256
-#define REVISION_NAME "Revision_Structure_v07"
+#ifndef REVISION_NAME
+#define REVISION_NAME "Revision_Combinational_v01"
+#endif
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
-#define REPORT_HTML_PATH "benchmarks/results/revision_structure_v07.html"
+#ifndef REPORT_HTML_PATH
+#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v01.html"
+#endif
+
+typedef struct hebs_bench_target_s
+{
+	const char* suite_name;
+	const char* bench_path;
+
+} hebs_bench_target_t;
+
+static const hebs_bench_target_t HEBS_BENCH_TARGETS[] =
+{
+	{ "ISCAS85", "benchmarks/benches/ISCAS85/c17.bench" },
+	{ "ISCAS85", "benchmarks/benches/ISCAS85/c432.bench" },
+	{ "ISCAS85", "benchmarks/benches/ISCAS85/c499.bench" },
+	{ "ISCAS85", "benchmarks/benches/ISCAS85/c6288.bench" },
+	{ "ISCAS85", "benchmarks/benches/ISCAS85/c880.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s27.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s298.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s382.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s526.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s820.bench" }
+};
+
+#define HEBS_BENCH_TARGET_COUNT (sizeof(HEBS_BENCH_TARGETS) / sizeof(HEBS_BENCH_TARGETS[0]))
 
 static const char* hebs_basename_ptr(const char* path)
 {
@@ -442,17 +471,13 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 
 int main(void)
 {
-	WIN32_FIND_DATAA suite_find_data;
-	HANDLE suite_find_handle;
 	hebs_metric_row_t registry[MAX_BENCH_RESULTS];
-	char suite_glob[512];
-	char bench_glob[512];
-	char bench_path[512];
 	char timestamp[32];
 	char date_text[32];
 	char git_hash[64];
 	int result_count;
 	int failures;
+	uint32_t target_idx;
 
 	result_count = 0;
 	failures = 0;
@@ -461,92 +486,40 @@ int main(void)
 	hebs_get_run_clock(timestamp, sizeof(timestamp), date_text, sizeof(date_text));
 	hebs_get_git_commit_hash(git_hash, sizeof(git_hash));
 
-	snprintf(suite_glob, sizeof(suite_glob), "%s*", BENCH_ROOT);
-	suite_find_handle = FindFirstFileA(suite_glob, &suite_find_data);
-	if (suite_find_handle == INVALID_HANDLE_VALUE)
+	for (target_idx = 0U; target_idx < HEBS_BENCH_TARGET_COUNT; ++target_idx)
 	{
-		printf("No suite directories found under %s\n", BENCH_ROOT);
-		return 1;
+		const hebs_bench_target_t* target = &HEBS_BENCH_TARGETS[target_idx];
+		if (result_count >= MAX_BENCH_RESULTS)
+		{
+			++failures;
+			break;
+
+		}
+
+		if (!hebs_run_single_bench(target->suite_name, target->bench_path, &registry[result_count]))
+		{
+			++failures;
+			continue;
+
+		}
+
+		if (registry[result_count].geps_regression_fail)
+		{
+			printf("REGRESSION FAIL: %s/%s p50 GEPS dropped %.2f%% versus previous.\n", registry[result_count].suite_name, registry[result_count].benchmark, -registry[result_count].geps_delta_prev_pct);
+			++failures;
+
+		}
+
+		if (!registry[result_count].fingerprint_stable)
+		{
+			printf("FINGERPRINT FAIL: %s/%s tray CRC32 unstable.\n", registry[result_count].suite_name, registry[result_count].benchmark);
+			++failures;
+
+		}
+
+		++result_count;
 
 	}
-
-	do
-	{
-		WIN32_FIND_DATAA bench_find_data;
-		HANDLE bench_find_handle;
-		char suite_name[64];
-
-		if ((suite_find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0U)
-		{
-			continue;
-
-		}
-
-		if (strcmp(suite_find_data.cFileName, ".") == 0 || strcmp(suite_find_data.cFileName, "..") == 0)
-		{
-			continue;
-
-		}
-
-		{
-			size_t len = strnlen(suite_find_data.cFileName, sizeof(suite_name) - 1U);
-			memcpy(suite_name, suite_find_data.cFileName, len);
-			suite_name[len] = '\0';
-		}
-		snprintf(bench_glob, sizeof(bench_glob), "%s%s/*.bench", BENCH_ROOT, suite_name);
-		bench_find_handle = FindFirstFileA(bench_glob, &bench_find_data);
-		if (bench_find_handle == INVALID_HANDLE_VALUE)
-		{
-			continue;
-
-		}
-
-		do
-		{
-			if ((bench_find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U)
-			{
-				continue;
-
-			}
-
-			if (result_count >= MAX_BENCH_RESULTS)
-			{
-				++failures;
-				break;
-
-			}
-
-			snprintf(bench_path, sizeof(bench_path), "%s%s/%s", BENCH_ROOT, suite_name, bench_find_data.cFileName);
-			if (!hebs_run_single_bench(suite_name, bench_path, &registry[result_count]))
-			{
-				++failures;
-				continue;
-
-			}
-
-			if (registry[result_count].geps_regression_fail)
-			{
-				printf("REGRESSION FAIL: %s/%s p50 GEPS dropped %.2f%% versus previous.\n", registry[result_count].suite_name, registry[result_count].benchmark, -registry[result_count].geps_delta_prev_pct);
-				++failures;
-
-			}
-
-			if (!registry[result_count].fingerprint_stable)
-			{
-				printf("FINGERPRINT FAIL: %s/%s tray CRC32 unstable.\n", registry[result_count].suite_name, registry[result_count].benchmark);
-				++failures;
-
-			}
-
-			++result_count;
-
-		} while (FindNextFileA(bench_find_handle, &bench_find_data) != 0);
-
-		FindClose(bench_find_handle);
-
-	} while (FindNextFileA(suite_find_handle, &suite_find_data) != 0);
-
-	FindClose(suite_find_handle);
 
 	if (result_count > 0)
 	{

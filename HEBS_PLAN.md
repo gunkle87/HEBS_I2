@@ -170,3 +170,35 @@ ICF CANONICAL DEFINITION:
       internal node transitions / primary input transitions
     - Historical ICF values produced with any prior formula are not directly comparable
       to the canonical formula and must be labeled as pre-canonical in reports.
+
+
+SRAM KEY TAKEAWAYS:
+    1. The "Performance Tank" we are avoiding
+    The old repo explicitly rejected SRAM at compile-time with a hard error: SRAM is not supported by this runner path yet.
+
+    The Reason: The audit shows that sequential state was managed using uint8_t arrays, meaning one full byte per DFF.
+
+    The Impact: If they had implemented SRAM this way, every memory access would have required a scalar byte-read from a struct, which is incompatible with 64-bit SIMD. By seeing this, we confirm that our decision to use Parallel DFF Trays (bit-packing state into uint64_t) is the correct way to prevent "performance tanks".
+
+    2. The "Zero-Copy" Pointer Swap (A Golden Idea)
+    The old runner used a highly efficient mechanism for the tick boundary:
+
+    Mechanism: It maintained present_words and next_words trays.
+
+    The Optimization: Instead of a full memory copy (memcpy) to move data at the end of a tick, it simply swapped the pointers: tmp_words = ctx->present_words; ctx->present_words = ctx->next_words; ctx->next_words = tmp_words;.
+
+    Takeaway: This is a "Zero-Copy" commit. It ensures that the results of the "Waterfall" instantly become the inputs for the next tick without a single CPU cycle wasted on moving bytes.
+
+    3. Lowering: Making Complex Logic "Pure"
+    A brilliant takeaway from the audit is how they handled DLATCH:
+
+    The Technique: They didn't build a complex "Latch" runtime entity. Instead, they lowered it into a mux2 and a DFF_P.
+
+    The Benefit: This kept the runtime engine "Pure". The engine only had to understand simple gates and flip-flops, while the complexity was handled upfront by the Loader.
+
+    New Idea: We can use this "Lowering" strategy for the Full 8-State Primitive Suite. Instead of writing complex C code for every gate variant, we can have the Loader decompose complex behaviors into our core bit-parallel primitives.
+
+    4. Sequential Clocking (The "Rise" Logic)
+    The old repo used a very lean bitwise check for edge-triggering: rise = clk & ~clk_prev.
+
+Application: In our SIMD Batch Executor, we can apply this across 64 clocks at once. By storing clk_prev as a 64-bit tray, we can detect rising edges for an entire batch of DFFs in a single AND/NOT operation.
