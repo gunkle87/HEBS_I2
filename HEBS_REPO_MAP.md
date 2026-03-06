@@ -865,3 +865,18 @@ Canonical v04 notes:
 1. c6288 CRC lock remained stable: `0x90B28CB8`.
 2. Non-canon Titan sanity mode is wired, but Titan bench files are absent in this repo snapshot (`c7552/s5378/s38584` missing), so only base 10 benches execute.
 
+### Revision_Combinational_v05 (rebuild)
+
+Adaptive sequential commit:
+1. Added DFF-mode threshold in `core/state_manager.c`:
+   - `HEBS_DFF_SCALAR_THRESHOLD = 64`
+2. Added scalar bypass path:
+   - `hebs_sequential_commit_scalar(...)`
+3. Added large-circuit tray-vector path:
+   - `hebs_sequential_commit_vectorized(...)`
+4. Dispatcher in `hebs_sequential_commit(...)` now selects scalar/vector mode by `dff_exec_count`.
+
+Canonical v05 notes:
+1. c6288 CRC lock remained stable: `0x90B28CB8`.
+2. Non-canon Titan sanity mode remains active but Titan bench files are absent in this repo snapshot (`c7552/s5378/s38584` missing), so Titan GEPS checks are blocked by missing inputs.
+
