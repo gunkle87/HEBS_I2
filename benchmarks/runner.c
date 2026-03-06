@@ -27,13 +27,13 @@
 #define BENCH_ROOT "benchmarks/benches/"
 #define MAX_BENCH_RESULTS 256
 #ifndef REVISION_NAME
-#define REVISION_NAME "Revision_Combinational_v03"
+#define REVISION_NAME "Revision_Combinational_v04"
 #endif
 #ifndef METRICS_CSV_PATH
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
 #endif
 #ifndef REPORT_HTML_PATH
-#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v03.html"
+#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v04.html"
 #endif
 
 typedef struct hebs_bench_target_s
@@ -356,6 +356,35 @@ static uint32_t hebs_crc32_bytes(const uint8_t* data, size_t len)
 
 }
 
+static uint32_t hebs_crc32_signal_trays(const hebs_engine* engine)
+{
+	uint64_t tray_shadow[HEBS_MAX_SIGNAL_TRAYS];
+	uint32_t tray_idx;
+
+	if (!engine)
+	{
+		return 0U;
+
+	}
+
+	for (tray_idx = 0U; tray_idx < engine->tray_count; ++tray_idx)
+	{
+		const uint64_t* tray_ptr = hebs_get_signal_tray(engine, tray_idx);
+		if (!tray_ptr)
+		{
+			tray_shadow[tray_idx] = 0ULL;
+			continue;
+
+		}
+
+		tray_shadow[tray_idx] = *tray_ptr;
+
+	}
+
+	return hebs_crc32_bytes((const uint8_t*)tray_shadow, (size_t)engine->tray_count * sizeof(uint64_t));
+
+}
+
 static double hebs_binary_entropy(double p)
 {
 	if (p <= 0.0 || p >= 1.0)
@@ -559,7 +588,7 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 		timer_stop(&timer);
 		runtimes[i] = timer_elapsed_sec(&timer);
 		geps_runs[i] = (runtimes[i] > 0.0) ? (((double)plan->gate_count * (double)SIM_CYCLES) / runtimes[i]) : 0.0;
-		crc_runs[i] = hebs_crc32_bytes((const uint8_t*)engine.signal_trays, (size_t)engine.tray_count * sizeof(uint64_t));
+		crc_runs[i] = hebs_crc32_signal_trays(&engine);
 		metrics = hebs_get_metrics(&engine, plan);
 
 		if (i == 0)

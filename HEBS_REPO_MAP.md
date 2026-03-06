@@ -844,3 +844,24 @@ Hot-path profile (canonical v03 run, c6288):
 3. XOR ns/op: `2.581`
 4. overhead share vs NAND path: `39.72%`
 
+### Revision_Combinational_v04 (rebuild)
+
+Sequential/vectorized updates:
+1. Added DFF execution metadata in `hebs_plan`:
+   - `dff_exec_count`
+   - `dff_exec_data`
+   - `dff_commit_mask`
+2. Loader now precomputes DFF commit metadata:
+   - `hebs_build_dff_execution_plan(...)`
+3. `hebs_sequential_commit(...)` now stages DFF tray updates and commits by tray mask:
+   - tray-level XOR delta accumulation with `__builtin_popcountll`
+   - tray-level DFF state transfer into `next_signal_trays`
+
+Probe API:
+1. Added `hebs_get_signal_tray(const hebs_engine*, uint32_t)` in public API.
+2. Runner logic CRC path now reads trays through `hebs_get_signal_tray(...)`.
+
+Canonical v04 notes:
+1. c6288 CRC lock remained stable: `0x90B28CB8`.
+2. Non-canon Titan sanity mode is wired, but Titan bench files are absent in this repo snapshot (`c7552/s5378/s38584` missing), so only base 10 benches execute.
+

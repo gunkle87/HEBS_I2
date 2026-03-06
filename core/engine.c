@@ -402,3 +402,15 @@ hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* pla
 	return hebs_read_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset);
 
 }
+
+const uint64_t* hebs_get_signal_tray(const hebs_engine* ctx, uint32_t tray_index)
+{
+	if (!ctx || !ctx->signal_trays || tray_index >= ctx->tray_count)
+	{
+		return NULL;
+
+	}
+
+	return &ctx->signal_trays[tray_index];
+
+}

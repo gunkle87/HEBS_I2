@@ -102,6 +102,9 @@ typedef struct hebs_plan_s
 	hebs_lep_instruction_t* lep_data;
 	uint32_t dff_instruction_count;
 	uint32_t* dff_instruction_indices;
+	uint32_t dff_exec_count;
+	hebs_exec_instruction_t* dff_exec_data;
+	uint64_t* dff_commit_mask;
 	uint32_t comb_instruction_count;
 	uint32_t* comb_instruction_indices;
 	hebs_exec_instruction_t* comb_exec_data;
@@ -157,5 +160,6 @@ hebs_metrics hebs_get_metrics(const hebs_engine* ctx, const hebs_plan* plan);
 uint64_t hebs_get_state_hash(hebs_engine* ctx);
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value);
 hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);
+const uint64_t* hebs_get_signal_tray(const hebs_engine* ctx, uint32_t tray_index);
 
 #endif

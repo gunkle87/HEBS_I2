@@ -773,6 +773,64 @@ static int hebs_index_dff_instructions(hebs_plan* plan)
 
 }
 
+static int hebs_build_dff_execution_plan(hebs_plan* plan)
+{
+	uint32_t idx;
+
+	if (!plan)
+	{
+		return 0;
+
+	}
+
+	plan->dff_exec_count = plan->dff_instruction_count;
+	plan->dff_exec_data = NULL;
+	plan->dff_commit_mask = NULL;
+	if (plan->dff_instruction_count == 0U)
+	{
+		return 1;
+
+	}
+
+	plan->dff_exec_data = (hebs_exec_instruction_t*)calloc(plan->dff_instruction_count, sizeof(hebs_exec_instruction_t));
+	plan->dff_commit_mask = (uint64_t*)calloc(plan->tray_count, sizeof(uint64_t));
+	if (!plan->dff_exec_data || !plan->dff_commit_mask)
+	{
+		free(plan->dff_exec_data);
+		free(plan->dff_commit_mask);
+		plan->dff_exec_data = NULL;
+		plan->dff_commit_mask = NULL;
+		plan->dff_exec_count = 0U;
+		return 0;
+
+	}
+
+	for (idx = 0U; idx < plan->dff_instruction_count; ++idx)
+	{
+		const uint32_t dff_idx = plan->dff_instruction_indices[idx];
+		const hebs_lep_instruction_t* instr = &plan->lep_data[dff_idx];
+		hebs_exec_instruction_t* exec_instr = &plan->dff_exec_data[idx];
+
+		exec_instr->gate_type = (uint8_t)HEBS_GATE_DFF;
+		exec_instr->src_a_shift = (uint8_t)(instr->src_a_bit_offset % 64U);
+		exec_instr->src_b_shift = 0U;
+		exec_instr->dst_shift = (uint8_t)(instr->dst_bit_offset % 64U);
+		exec_instr->src_a_tray = instr->src_a_bit_offset / 64U;
+		exec_instr->src_b_tray = 0U;
+		exec_instr->dst_tray = instr->dst_bit_offset / 64U;
+		exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
+		if (exec_instr->dst_tray < plan->tray_count)
+		{
+			plan->dff_commit_mask[exec_instr->dst_tray] |= exec_instr->dst_mask;
+
+		}
+
+	}
+
+	return 1;
+
+}
+
 static int hebs_build_comb_execution_plan(hebs_plan* plan)
 {
 	static const uint8_t HEBS_COMB_GATE_ORDER[HEBS_COMB_GATE_TYPE_COUNT] =
@@ -1129,6 +1187,16 @@ hebs_plan* hebs_load_bench(const char* file_path)
 
 	}
 
+	if (!hebs_build_dff_execution_plan(plan))
+	{
+		hebs_free_signal_table(&signals);
+		free(primary_outputs);
+		free(gates);
+		hebs_free_plan(plan);
+		return NULL;
+
+	}
+
 	if (!hebs_build_comb_execution_plan(plan))
 	{
 		hebs_free_signal_table(&signals);
@@ -1168,6 +1236,8 @@ void hebs_free_plan(hebs_plan* plan)
 	free(plan->primary_input_ids);
 	free(plan->lep_data);
 	free(plan->dff_instruction_indices);
+	free(plan->dff_exec_data);
+	free(plan->dff_commit_mask);
 	free(plan->comb_instruction_indices);
 	free(plan->comb_exec_data);
 	free(plan->comb_spans);

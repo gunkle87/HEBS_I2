@@ -1,56 +1,11 @@
 #include "state_manager.h"
-
-static hebs_logic_t hebs_read_tray_logic(const uint64_t* trays, uint32_t tray_count, uint32_t bit_offset)
-{
-	uint32_t tray_index;
-	uint32_t bit_position;
-
-	if (!trays)
-	{
-		return HEBS_S0;
-
-	}
-
-	tray_index = bit_offset / 64U;
-	bit_position = bit_offset % 64U;
-	if (tray_index >= tray_count)
-	{
-		return HEBS_S0;
-
-	}
-
-	return (hebs_logic_t)((trays[tray_index] >> bit_position) & 0x3U);
-
-}
-
-static void hebs_write_tray_logic(uint64_t* trays, uint32_t tray_count, uint32_t bit_offset, hebs_logic_t value)
-{
-	uint32_t tray_index;
-	uint32_t bit_position;
-	uint64_t mask;
-
-	if (!trays)
-	{
-		return;
-
-	}
-
-	tray_index = bit_offset / 64U;
-	bit_position = bit_offset % 64U;
-	if (tray_index >= tray_count)
-	{
-		return;
-
-	}
-
-	mask = ~(0x3ULL << bit_position);
-	trays[tray_index] = (trays[tray_index] & mask) | (((uint64_t)value & 0x3ULL) << bit_position);
-
-}
+#include <string.h>
 
 void hebs_sequential_commit(hebs_engine* ctx, const hebs_plan* plan)
 {
+	uint64_t staged_dff_trays[HEBS_MAX_SIGNAL_TRAYS];
 	uint32_t instr_idx;
+	uint32_t tray_idx;
 
 	if (!ctx || !plan)
 	{
@@ -58,38 +13,45 @@ void hebs_sequential_commit(hebs_engine* ctx, const hebs_plan* plan)
 
 	}
 
-	if (plan->dff_instruction_count == 0U || !plan->dff_instruction_indices)
+	if (plan->dff_exec_count == 0U || !plan->dff_exec_data || !plan->dff_commit_mask)
 	{
 		return;
 
 	}
 
-	for (instr_idx = 0; instr_idx < plan->dff_instruction_count; ++instr_idx)
+	if (ctx->tray_count > HEBS_MAX_SIGNAL_TRAYS)
 	{
-		const uint32_t dff_idx = plan->dff_instruction_indices[instr_idx];
-		const hebs_lep_instruction_t* instr = &plan->lep_data[dff_idx];
-		hebs_logic_t dff_state_value;
-		hebs_logic_t dff_next_value;
-		uint64_t delta_bits;
+		return;
 
-		dff_state_value = hebs_read_tray_logic(ctx->dff_state_trays, ctx->tray_count, instr->dst_bit_offset);
-		dff_next_value = hebs_read_tray_logic(ctx->next_signal_trays, ctx->tray_count, instr->src_a_bit_offset);
-		delta_bits = ((uint64_t)dff_state_value ^ (uint64_t)dff_next_value) & 0x3ULL;
-		ctx->internal_transition_count += (uint64_t)__builtin_popcountll(delta_bits);
-		hebs_write_tray_logic(ctx->dff_state_trays, ctx->tray_count, instr->dst_bit_offset, dff_next_value);
+	}
+
+	memcpy(staged_dff_trays, ctx->dff_state_trays, (size_t)ctx->tray_count * sizeof(uint64_t));
+
+	for (instr_idx = 0U; instr_idx < plan->dff_exec_count; ++instr_idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &plan->dff_exec_data[instr_idx];
+		const uint64_t src_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t shifted_lane = src_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = staged_dff_trays[exec_instr->dst_tray];
+		staged_dff_trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
 		++ctx->signal_writes_committed;
 
 	}
 
-	for (instr_idx = 0; instr_idx < plan->dff_instruction_count; ++instr_idx)
+	for (tray_idx = 0U; tray_idx < ctx->tray_count; ++tray_idx)
 	{
-		const uint32_t dff_idx = plan->dff_instruction_indices[instr_idx];
-		const hebs_lep_instruction_t* instr = &plan->lep_data[dff_idx];
-		hebs_logic_t committed_value;
+		const uint64_t committed_tray = staged_dff_trays[tray_idx];
+		const uint64_t delta_tray = ctx->dff_state_trays[tray_idx] ^ committed_tray;
+		const uint64_t commit_mask = plan->dff_commit_mask[tray_idx];
+		ctx->internal_transition_count += (uint64_t)__builtin_popcountll(delta_tray);
+		ctx->dff_state_trays[tray_idx] = committed_tray;
+		if (commit_mask != 0U)
+		{
+			const uint64_t merged = (ctx->next_signal_trays[tray_idx] & ~commit_mask) | (committed_tray & commit_mask);
+			ctx->next_signal_trays[tray_idx] = merged;
+			++ctx->signal_writes_committed;
 
-		committed_value = hebs_read_tray_logic(ctx->dff_state_trays, ctx->tray_count, instr->dst_bit_offset);
-		hebs_write_tray_logic(ctx->next_signal_trays, ctx->tray_count, instr->dst_bit_offset, committed_value);
-		++ctx->signal_writes_committed;
+		}
 
 	}
 
