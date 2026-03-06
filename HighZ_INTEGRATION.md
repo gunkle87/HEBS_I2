@@ -394,3 +394,130 @@ Mitigation: explicit documented boundary rule in API and runner.
 
 Start Phase T1 only (data plumbing).  
 Do not implement queue logic until T1 tests are green and reviewed.
+
+## 20. Macro Primitive Architecture
+
+This section defines how macro primitives fit into the hybrid model without degrading HEBS zero-delay throughput.
+
+## 20.1 Objective
+
+Add hierarchical macro support so large circuits can be lowered into higher-level units (ALU, MUX/DEMUX, SRAM, etc.) while preserving deterministic behavior in both runtimes.
+
+## 20.2 Macro Registry Contract
+
+Each macro definition must provide:
+
+1. `macro_id`, `macro_version`, `macro_type`
+2. Port schema (ordered ports, direction, width, bit ordering)
+3. Capability flags:
+   - `ZERO_DELAY_NATIVE`
+   - `TIMED_BEHAVIORAL`
+   - `TIMED_DECOMPOSE_FALLBACK`
+4. Stateful storage contract (state size and reset semantics)
+5. Deterministic output ordering rule
+
+## 20.3 Runtime ABI
+
+Zero-delay entrypoint:
+
+```c
+typedef void (*hebs_macro_eval_zero_fn)(
+	const hebs_macro_instance* inst,
+	hebs_engine* ctx,
+	const hebs_plan* plan);
+```
+
+Timed entrypoint:
+
+```c
+typedef void (*hebs_macro_eval_timed_fn)(
+	const hebs_macro_instance* inst,
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	hebs_event_queue* q,
+	uint64_t time_ps,
+	uint32_t delta_cycle);
+```
+
+Fallback decomposition handle:
+
+```c
+typedef struct hebs_macro_fallback_s
+{
+	const hebs_plan* subplan;
+	uint8_t enabled;
+
+} hebs_macro_fallback_t;
+```
+
+## 20.4 Loader Integration
+
+Add a macro-lowering pass before final LEP/span build:
+
+1. Pattern-match canonical subgraphs against registered macro signatures.
+2. Replace matched gate region with one macro instance node.
+3. Preserve deterministic `topo_seq` assignment for macro nodes.
+4. Emit mapping metadata for debug and verification:
+   - replaced gate index range list
+   - macro instance ID
+   - external net binding table
+
+No runtime mode-specific logic should exist in this loader pass.
+
+## 20.5 Runtime Policy by Mode
+
+`HEBS_MODE_ZERO_DELAY`:
+
+- Always use `ZERO_DELAY_NATIVE` macro kernel when available.
+- If missing, use decomposition fallback for correctness.
+- Goal is throughput first, while preserving semantic equivalence.
+
+`HEBS_MODE_TIMED_EVENT`:
+
+- Prefer `TIMED_BEHAVIORAL` macro model.
+- If missing, use `TIMED_DECOMPOSE_FALLBACK`.
+- Do not force decomposition when a validated timed behavioral model exists.
+
+## 20.6 Timing Semantics for Macros
+
+Transport v1:
+
+1. Macro timed evaluation emits output events with deterministic per-port delays.
+2. Event ordering follows global key:
+   - `time_ps`, `delta_cycle`, `topo_seq`, `gate_idx`
+3. Same-time outputs from one macro instance are emitted in stable port index order.
+
+Inertial vNext scaffold:
+
+1. Maintain per-output generation/cancel token hooks in macro state.
+2. Keep inertial cancellation disabled in v1 transport runtime.
+
+## 20.7 Equivalence and Validation Gates
+
+Every macro must pass all gates before release:
+
+1. Functional equivalence:
+   - macro model vs decomposed reference netlist
+2. 8-state equivalence:
+   - strong/weak/Z/X behavior parity
+3. Timed determinism:
+   - repeated runs produce identical hashes and event counts
+4. All-delays-zero parity:
+   - timed macro path matches zero-delay checkpoints
+5. CRC and benchmark guard:
+   - c6288 lock unaffected in zero-delay canonical runs
+
+## 20.8 Rollout Sequence for Macros
+
+1. Infrastructure only (registry + lowering + ABI)
+2. Stateless pilot macro: MUX
+3. Stateful pilot macro: SRAM
+4. Arithmetic pilots: ALU8, then ALU16/ALU32
+5. Wider library expansion after parity/performance gates are stable
+
+## 20.9 Risk Controls
+
+1. No macro is enabled by default without passing equivalence gates.
+2. Macro enablement is feature-flagged by macro type and version.
+3. Runtime fallback to decomposition remains available for safety.
+4. Macro matching must be deterministic and reproducible across runs.
