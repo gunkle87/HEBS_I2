@@ -37,6 +37,7 @@ It covers:
 |---|---|---|
 | `AGENTS.md` | Governance | Agent authorization and execution policy.
 | `HEBS_PLAN.md` | Architecture Plan | High-level architecture, component roles, target structure.
+| `HighZ_INTEGRATION.md` | Integration Blueprint | Start-to-finish implementation plan for HEBS hybrid zero-delay + timed-event runtime integration.
 | `TAB_PROTOCOL.md` | Canonical Protocol | Mandatory test/benchmark rules and acceptance gates.
 | `Makefile` | Build Orchestration | Build, clean, and verify entry points.
 | `HEBS_REPO_MAP.md` | Repo Map | This technical reference.
