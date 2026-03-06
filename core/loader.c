@@ -819,7 +819,7 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 			if (local_count > 0U)
 			{
 				comb_count += local_count;
-				++span_count;
+				span_count += (local_count + (HEBS_BATCH_GATE_CHUNK - 1U)) / HEBS_BATCH_GATE_CHUNK;
 
 			}
 
@@ -892,10 +892,19 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 
 			if (local_count > 0U)
 			{
-				hebs_gate_span_t* span = &plan->comb_spans[span_idx++];
-				span->start = span_start;
-				span->count = local_count;
-				span->gate_type = gate_type;
+				uint32_t chunk_start = span_start;
+				uint32_t remaining = local_count;
+				while (remaining > 0U)
+				{
+					hebs_gate_span_t* span = &plan->comb_spans[span_idx++];
+					const uint32_t chunk_count = (remaining > HEBS_BATCH_GATE_CHUNK) ? HEBS_BATCH_GATE_CHUNK : remaining;
+					span->start = chunk_start;
+					span->count = chunk_count;
+					span->gate_type = gate_type;
+					chunk_start += chunk_count;
+					remaining -= chunk_count;
+
+				}
 
 			}
 

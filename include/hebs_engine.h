@@ -5,6 +5,9 @@
 
 #define HEBS_MAX_PRIMARY_INPUTS 4096
 #define HEBS_MAX_SIGNAL_TRAYS 4096
+#ifndef HEBS_BATCH_GATE_CHUNK
+#define HEBS_BATCH_GATE_CHUNK 64U
+#endif
 
 #if defined(_MSC_VER)
 #define HEBS_ALIGN64 __declspec(align(64))

@@ -817,3 +817,30 @@ Batch-loop tuning:
    - `dff_state_trays`
 3. Added local tray pointer pinning and `#pragma GCC unroll 4` in chunk hot loops.
 
+### Revision_Combinational_v03 (rebuild)
+
+Tight-loop overhead reductions:
+1. Batch chunk control is now compile-time configurable:
+   - `HEBS_BATCH_GATE_CHUNK` (default `64`)
+2. Loader now pre-splits combinational spans into fixed-size chunks at load-time:
+   - runtime `while` chunk splitting removed from hot path
+3. Engine now executes pre-split spans directly:
+   - one span dispatch -> one chunk loop
+
+Protocol support changes:
+1. Added non-canon runner controls:
+   - `HEBS_SKIP_ARTIFACTS=1` to suppress CSV/HTML writes
+   - `HEBS_ENABLE_TITAN_BENCHES=1` to append Titan benches when present
+
+Batch-size audit (non-canon, c6288 p50 GEPS):
+1. chunk 32: `338055833.89`
+2. chunk 64: `337444445.62`
+3. chunk 96: `337861935.29`
+4. chunk 128: `337058373.47`
+
+Hot-path profile (canonical v03 run, c6288):
+1. overhead ns/gate-equiv: `1.285`
+2. NAND ns/op: `1.951`
+3. XOR ns/op: `2.581`
+4. overhead share vs NAND path: `39.72%`
+

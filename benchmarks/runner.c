@@ -18,16 +18,22 @@
 #ifndef SIM_CYCLES
 #define SIM_CYCLES 1000
 #endif
+#ifndef HEBS_ENABLE_TITAN_BENCHES
+#define HEBS_ENABLE_TITAN_BENCHES 0
+#endif
+#ifndef HEBS_SKIP_ARTIFACTS
+#define HEBS_SKIP_ARTIFACTS 0
+#endif
 #define BENCH_ROOT "benchmarks/benches/"
 #define MAX_BENCH_RESULTS 256
 #ifndef REVISION_NAME
-#define REVISION_NAME "Revision_Combinational_v02"
+#define REVISION_NAME "Revision_Combinational_v03"
 #endif
 #ifndef METRICS_CSV_PATH
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
 #endif
 #ifndef REPORT_HTML_PATH
-#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v02.html"
+#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v03.html"
 #endif
 
 typedef struct hebs_bench_target_s
@@ -49,6 +55,12 @@ static const hebs_bench_target_t HEBS_BENCH_TARGETS[] =
 	{ "ISCAS89", "benchmarks/benches/ISCAS89/s382.bench" },
 	{ "ISCAS89", "benchmarks/benches/ISCAS89/s526.bench" },
 	{ "ISCAS89", "benchmarks/benches/ISCAS89/s820.bench" }
+#if HEBS_ENABLE_TITAN_BENCHES
+	,
+	{ "ISCAS85", "benchmarks/benches/ISCAS85/c7552.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s5378.bench" },
+	{ "ISCAS89", "benchmarks/benches/ISCAS89/s38584.bench" }
+#endif
 };
 
 #define HEBS_BENCH_TARGET_COUNT (sizeof(HEBS_BENCH_TARGETS) / sizeof(HEBS_BENCH_TARGETS[0]))
@@ -212,6 +224,7 @@ static void hebs_profile_c6288_hot_path(void)
 		: 0.0;
 
 	printf("\nHOT PATH PROFILE (c6288)\n");
+	printf("Configured batch chunk: %u\n", (unsigned int)HEBS_BATCH_GATE_CHUNK);
 	printf("Batch overhead ns/gate-equiv: %.3f\n", overhead_ns_per_gate_equiv);
 	printf("NAND math ns/op: %.3f\n", nand_ns_per_op);
 	printf("XOR math ns/op: %.3f\n", xor_ns_per_op);
@@ -684,31 +697,40 @@ int main(void)
 
 	if (result_count > 0)
 	{
-		if (!generate_master_report(
-			registry,
-			result_count,
-			REVISION_NAME,
-			timestamp,
-			date_text,
-			git_hash,
-			REPORT_HTML_PATH))
+		if (!HEBS_SKIP_ARTIFACTS)
 		{
-			printf("Failed to write report HTML\n");
-			++failures;
+			if (!generate_master_report(
+				registry,
+				result_count,
+				REVISION_NAME,
+				timestamp,
+				date_text,
+				git_hash,
+				REPORT_HTML_PATH))
+			{
+				printf("Failed to write report HTML\n");
+				++failures;
+
+			}
+
+			if (!append_metrics_history_csv(
+				registry,
+				result_count,
+				REVISION_NAME,
+				timestamp,
+				date_text,
+				git_hash,
+				METRICS_CSV_PATH))
+			{
+				printf("Failed to append metrics history CSV\n");
+				++failures;
+
+			}
 
 		}
-
-		if (!append_metrics_history_csv(
-			registry,
-			result_count,
-			REVISION_NAME,
-			timestamp,
-			date_text,
-			git_hash,
-			METRICS_CSV_PATH))
+		else
 		{
-			printf("Failed to append metrics history CSV\n");
-			++failures;
+			printf("Non-canon mode: artifact generation skipped.\n");
 
 		}
 

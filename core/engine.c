@@ -136,37 +136,28 @@ static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan
 	for (span_idx = 0U; span_idx < plan->comb_span_count; ++span_idx)
 	{
 		const hebs_gate_span_t* span = &plan->comb_spans[span_idx];
-		uint32_t processed = 0U;
-		while (processed < span->count)
+		switch ((hebs_gate_type_t)span->gate_type)
 		{
-			const uint32_t chunk_count = ((span->count - processed) > 64U) ? 64U : (span->count - processed);
-			const uint32_t chunk_start = span->start + processed;
-			switch ((hebs_gate_type_t)span->gate_type)
-			{
-				case HEBS_GATE_AND:
-					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_and_simd);
-					break;
-				case HEBS_GATE_OR:
-					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_or_simd);
-					break;
-				case HEBS_GATE_NOT:
-					hebs_execute_unary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_not_simd);
-					break;
-				case HEBS_GATE_NAND:
-					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_nand_simd);
-					break;
-				case HEBS_GATE_NOR:
-					hebs_execute_binary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_nor_simd);
-					break;
-				case HEBS_GATE_BUF:
-					hebs_execute_unary_chunk(ctx, plan, chunk_start, chunk_count, hebs_gate_buf_simd);
-					break;
-				default:
-					break;
-
-			}
-
-			processed += chunk_count;
+			case HEBS_GATE_AND:
+				hebs_execute_binary_chunk(ctx, plan, span->start, span->count, hebs_gate_and_simd);
+				break;
+			case HEBS_GATE_OR:
+				hebs_execute_binary_chunk(ctx, plan, span->start, span->count, hebs_gate_or_simd);
+				break;
+			case HEBS_GATE_NOT:
+				hebs_execute_unary_chunk(ctx, plan, span->start, span->count, hebs_gate_not_simd);
+				break;
+			case HEBS_GATE_NAND:
+				hebs_execute_binary_chunk(ctx, plan, span->start, span->count, hebs_gate_nand_simd);
+				break;
+			case HEBS_GATE_NOR:
+				hebs_execute_binary_chunk(ctx, plan, span->start, span->count, hebs_gate_nor_simd);
+				break;
+			case HEBS_GATE_BUF:
+				hebs_execute_unary_chunk(ctx, plan, span->start, span->count, hebs_gate_buf_simd);
+				break;
+			default:
+				break;
 
 		}
 
