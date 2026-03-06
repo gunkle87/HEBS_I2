@@ -831,6 +831,69 @@ static int hebs_build_dff_execution_plan(hebs_plan* plan)
 
 }
 
+typedef struct hebs_comb_locality_entry_s
+{
+	uint32_t instr_idx;
+	uint32_t src_a_tray;
+	uint32_t src_b_tray;
+	uint32_t dst_tray;
+	uint8_t src_a_shift;
+	uint8_t src_b_shift;
+	uint8_t dst_shift;
+
+} hebs_comb_locality_entry_t;
+
+static int hebs_compare_comb_locality_entries(const void* lhs, const void* rhs)
+{
+	const hebs_comb_locality_entry_t* a = (const hebs_comb_locality_entry_t*)lhs;
+	const hebs_comb_locality_entry_t* b = (const hebs_comb_locality_entry_t*)rhs;
+
+	if (a->src_a_tray != b->src_a_tray)
+	{
+		return (a->src_a_tray < b->src_a_tray) ? -1 : 1;
+
+	}
+
+	if (a->src_b_tray != b->src_b_tray)
+	{
+		return (a->src_b_tray < b->src_b_tray) ? -1 : 1;
+
+	}
+
+	if (a->dst_tray != b->dst_tray)
+	{
+		return (a->dst_tray < b->dst_tray) ? -1 : 1;
+
+	}
+
+	if (a->src_a_shift != b->src_a_shift)
+	{
+		return (a->src_a_shift < b->src_a_shift) ? -1 : 1;
+
+	}
+
+	if (a->src_b_shift != b->src_b_shift)
+	{
+		return (a->src_b_shift < b->src_b_shift) ? -1 : 1;
+
+	}
+
+	if (a->dst_shift != b->dst_shift)
+	{
+		return (a->dst_shift < b->dst_shift) ? -1 : 1;
+
+	}
+
+	if (a->instr_idx != b->instr_idx)
+	{
+		return (a->instr_idx < b->instr_idx) ? -1 : 1;
+
+	}
+
+	return 0;
+
+}
+
 static int hebs_build_comb_execution_plan(hebs_plan* plan)
 {
 	static const uint8_t HEBS_COMB_GATE_ORDER[HEBS_COMB_GATE_TYPE_COUNT] =
@@ -849,6 +912,7 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 	uint32_t span_count;
 	uint32_t write_idx;
 	uint32_t span_idx;
+	hebs_comb_locality_entry_t* local_entries;
 
 	if (!plan || !plan->lep_data)
 	{
@@ -890,6 +954,7 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 	plan->comb_instruction_indices = NULL;
 	plan->comb_exec_data = NULL;
 	plan->comb_spans = NULL;
+	local_entries = NULL;
 	if (comb_count == 0U || span_count == 0U)
 	{
 		return 1;
@@ -900,6 +965,21 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 	plan->comb_exec_data = (hebs_exec_instruction_t*)calloc(comb_count, sizeof(hebs_exec_instruction_t));
 	plan->comb_spans = (hebs_gate_span_t*)calloc(span_count, sizeof(hebs_gate_span_t));
 	if (!plan->comb_instruction_indices || !plan->comb_exec_data || !plan->comb_spans)
+	{
+		free(plan->comb_instruction_indices);
+		free(plan->comb_exec_data);
+		free(plan->comb_spans);
+		plan->comb_instruction_indices = NULL;
+		plan->comb_exec_data = NULL;
+		plan->comb_spans = NULL;
+		plan->comb_instruction_count = 0U;
+		plan->comb_span_count = 0U;
+		return 0;
+
+	}
+
+	local_entries = (hebs_comb_locality_entry_t*)malloc((size_t)plan->gate_count * sizeof(hebs_comb_locality_entry_t));
+	if (!local_entries)
 	{
 		free(plan->comb_instruction_indices);
 		free(plan->comb_exec_data);
@@ -926,30 +1006,45 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 			for (instr_idx = 0U; instr_idx < plan->gate_count; ++instr_idx)
 			{
 				const hebs_lep_instruction_t* instr = &plan->lep_data[instr_idx];
-				hebs_exec_instruction_t* exec_instr;
 				if (instr->level != level || instr->gate_type != gate_type)
 				{
 					continue;
 
 				}
 
-				plan->comb_instruction_indices[write_idx] = instr_idx;
-				exec_instr = &plan->comb_exec_data[write_idx];
-				exec_instr->gate_type = gate_type;
-				exec_instr->src_a_shift = (uint8_t)(instr->src_a_bit_offset % 64U);
-				exec_instr->src_b_shift = (uint8_t)(instr->src_b_bit_offset % 64U);
-				exec_instr->dst_shift = (uint8_t)(instr->dst_bit_offset % 64U);
-				exec_instr->src_a_tray = instr->src_a_bit_offset / 64U;
-				exec_instr->src_b_tray = instr->src_b_bit_offset / 64U;
-				exec_instr->dst_tray = instr->dst_bit_offset / 64U;
-				exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
-				++write_idx;
+				local_entries[local_count].instr_idx = instr_idx;
+				local_entries[local_count].src_a_shift = (uint8_t)(instr->src_a_bit_offset % 64U);
+				local_entries[local_count].src_b_shift = (uint8_t)(instr->src_b_bit_offset % 64U);
+				local_entries[local_count].dst_shift = (uint8_t)(instr->dst_bit_offset % 64U);
+				local_entries[local_count].src_a_tray = instr->src_a_bit_offset / 64U;
+				local_entries[local_count].src_b_tray = instr->src_b_bit_offset / 64U;
+				local_entries[local_count].dst_tray = instr->dst_bit_offset / 64U;
 				++local_count;
 
 			}
 
 			if (local_count > 0U)
 			{
+				uint32_t local_idx;
+				qsort(local_entries, local_count, sizeof(local_entries[0]), hebs_compare_comb_locality_entries);
+
+				for (local_idx = 0U; local_idx < local_count; ++local_idx)
+				{
+					hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[write_idx];
+					const hebs_comb_locality_entry_t* local = &local_entries[local_idx];
+					plan->comb_instruction_indices[write_idx] = local->instr_idx;
+					exec_instr->gate_type = gate_type;
+					exec_instr->src_a_shift = local->src_a_shift;
+					exec_instr->src_b_shift = local->src_b_shift;
+					exec_instr->dst_shift = local->dst_shift;
+					exec_instr->src_a_tray = local->src_a_tray;
+					exec_instr->src_b_tray = local->src_b_tray;
+					exec_instr->dst_tray = local->dst_tray;
+					exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
+					++write_idx;
+
+				}
+
 				uint32_t chunk_start = span_start;
 				uint32_t remaining = local_count;
 				while (remaining > 0U)
@@ -970,6 +1065,7 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 
 	}
 
+	free(local_entries);
 	return 1;
 
 }

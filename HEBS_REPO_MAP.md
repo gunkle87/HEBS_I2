@@ -95,6 +95,7 @@ It covers:
 | `benchmarks/results/revision_combinational_v03.html` | HTML benchmark report | prior combinational artifact |
 | `benchmarks/results/revision_combinational_v04.html` | HTML benchmark report | prior combinational artifact |
 | `benchmarks/results/revision_combinational_v05.html` | HTML benchmark report | prior combinational artifact |
+| `benchmarks/results/archive/non_canon_passB_2026-03-06.md` | Non-canon tuning archive | removed Pass B threshold-packing run block for historical reference |
 | `benchmarks/results/revision_optimized_v01.html` | HTML benchmark report | prior optimized artifact |
 | `benchmarks/results/revision_optimized_v02.html` | HTML benchmark report | prior optimized artifact |
 | `benchmarks/results/revision_optimized_v03.html` | HTML benchmark report | active optimized artifact |
@@ -879,4 +880,13 @@ Adaptive sequential commit:
 Canonical v05 notes:
 1. c6288 CRC lock remained stable: `0x90B28CB8`.
 2. Non-canon Titan sanity mode remains active but Titan bench files are absent in this repo snapshot (`c7552/s5378/s38584` missing), so Titan GEPS checks are blocked by missing inputs.
+3. Pass A locality packing is active in loader combinational plan construction:
+   - sort key: `src_a_tray`, `src_b_tray`, `dst_tray`, then lane shifts, then instruction index.
+4. Rejected Pass B threshold-packing trial was removed from active `metrics_history.csv` and archived at:
+   - `benchmarks/results/archive/non_canon_passB_2026-03-06.md`
+5. Latest canonical v05 run after Pass B removal:
+   - header: `Revision_Combinational_v05 | 01:04:23 | 2026-03-06 | 18fae8a`
+   - global mean GEPS: `284269232.16`
+   - c6288 p50 GEPS: `352790933.62`
+   - c6288 CRC32: `0x90B28CB8`
 

@@ -10,14 +10,11 @@ static void hebs_sequential_commit_scalar(hebs_engine* ctx, const hebs_plan* pla
 	for (instr_idx = 0U; instr_idx < plan->dff_exec_count; ++instr_idx)
 	{
 		const hebs_exec_instruction_t* exec_instr = &plan->dff_exec_data[instr_idx];
-		const uint64_t prior_lane = (ctx->dff_state_trays[exec_instr->dst_tray] >> exec_instr->dst_shift) & 0x3ULL;
 		const uint64_t next_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t delta_lane = (prior_lane ^ next_lane) & 0x3ULL;
 		const uint64_t shifted_lane = next_lane << exec_instr->dst_shift;
 		const uint64_t state_tray = ctx->dff_state_trays[exec_instr->dst_tray];
 		const uint64_t signal_tray = ctx->next_signal_trays[exec_instr->dst_tray];
 
-		ctx->internal_transition_count += (uint64_t)__builtin_popcountll(delta_lane);
 		ctx->dff_state_trays[exec_instr->dst_tray] = (state_tray & ~exec_instr->dst_mask) | shifted_lane;
 		ctx->next_signal_trays[exec_instr->dst_tray] = (signal_tray & ~exec_instr->dst_mask) | shifted_lane;
 		ctx->signal_writes_committed += 2U;
@@ -54,9 +51,7 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 	for (tray_idx = 0U; tray_idx < ctx->tray_count; ++tray_idx)
 	{
 		const uint64_t committed_tray = staged_dff_trays[tray_idx];
-		const uint64_t delta_tray = ctx->dff_state_trays[tray_idx] ^ committed_tray;
 		const uint64_t commit_mask = plan->dff_commit_mask[tray_idx];
-		ctx->internal_transition_count += (uint64_t)__builtin_popcountll(delta_tray);
 		ctx->dff_state_trays[tray_idx] = committed_tray;
 		if (commit_mask != 0U)
 		{

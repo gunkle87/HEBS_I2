@@ -172,6 +172,8 @@ static void test_parallel_dff_tray_commit(void)
 	uint32_t primary_inputs[1] = { 0U };
 	hebs_lep_instruction_t lep_data[1];
 	uint32_t dff_indices[1] = { 0U };
+	hebs_exec_instruction_t dff_exec_data[1];
+	uint64_t dff_commit_mask[1] = { 0ULL };
 	hebs_plan plan = { 0 };
 
 	lep_data[0].gate_type = (uint8_t)HEBS_GATE_DFF;
@@ -192,6 +194,18 @@ static void test_parallel_dff_tray_commit(void)
 	plan.lep_data = lep_data;
 	plan.dff_instruction_count = 1U;
 	plan.dff_instruction_indices = dff_indices;
+	dff_exec_data[0].gate_type = (uint8_t)HEBS_GATE_DFF;
+	dff_exec_data[0].src_a_shift = 0U;
+	dff_exec_data[0].src_b_shift = 0U;
+	dff_exec_data[0].dst_shift = 2U;
+	dff_exec_data[0].src_a_tray = 0U;
+	dff_exec_data[0].src_b_tray = 0U;
+	dff_exec_data[0].dst_tray = 0U;
+	dff_exec_data[0].dst_mask = 0x3ULL << 2U;
+	dff_commit_mask[0] = dff_exec_data[0].dst_mask;
+	plan.dff_exec_count = 1U;
+	plan.dff_exec_data = dff_exec_data;
+	plan.dff_commit_mask = dff_commit_mask;
 
 	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
