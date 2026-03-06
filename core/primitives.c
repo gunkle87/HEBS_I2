@@ -106,6 +106,12 @@ uint64_t hebs_gate_weak_pull_simd(uint64_t tray_a)
 
 }
 
+uint64_t hebs_gate_weak_pull_down_simd(uint64_t tray_a)
+{
+	return hebs_gate_not_simd(hebs_gate_weak_pull_simd(hebs_gate_not_simd(tray_a)));
+
+}
+
 uint64_t hebs_gate_strong_pull_simd(uint64_t tray_a)
 {
 	(void)tray_a;
@@ -268,6 +274,12 @@ hebs_logic_t hebs_eval_weak_pull(hebs_logic_t a)
 			return HEBS_WX;
 
 	}
+
+}
+
+hebs_logic_t hebs_eval_weak_pull_down(hebs_logic_t a)
+{
+	return hebs_eval_not(hebs_eval_weak_pull(hebs_eval_not(a)));
 
 }
 

@@ -53,7 +53,7 @@ It covers:
 |---|---|---|
 | `core/engine.c` | Simulation execution and bit-tray state updates with span-driven 64-gate SIMD batch execution. | `hebs_init_engine`, `hebs_tick_execute` (internal), `hebs_tick_execute_fallback` (internal), `hebs_tick`, `hebs_get_metrics`, `hebs_get_signal_tray`, `hebs_get_state_hash`, `hebs_set_primary_input`, `hebs_get_primary_input` |
 | `core/loader.c` | `.bench` parsing, signal table build, levelization, LEP packing, batch-span precompute, LEP hash. | `hebs_load_bench`, `hebs_levelize_and_pack`, `hebs_build_batch_spans`, `hebs_calculate_lep_hash`, `hebs_free_plan` |
-| `core/primitives.c` | 8-state primitive library with SIMD tray operators and scalar evaluators. | `hebs_gate_and/or/xor/nand/nor/xnor/not/buf`, `hebs_gate_weak_pull/strong_pull/vcc/gnd/tristate`, `hebs_eval_*` family |
+| `core/primitives.c` | 8-state primitive library with SIMD tray operators and scalar evaluators. | `hebs_gate_and/or/xor/nand/nor/xnor/not/buf`, `hebs_gate_weak_pull/weak_pull_down/strong_pull/vcc/gnd/tristate`, `hebs_eval_*` family |
 | `core/state_manager.c` | Sequential state manager for SIMD/vectorized DFF tray commit. | `hebs_sequential_commit` |
 
 ### 3.3 `/include` (Public API Headers)
@@ -161,6 +161,13 @@ It covers:
 | 4 | `HEBS_GATE_NOR` |
 | 5 | `HEBS_GATE_BUF` |
 | 6 | `HEBS_GATE_DFF` |
+| 7 | `HEBS_GATE_XOR` |
+| 8 | `HEBS_GATE_XNOR` |
+| 9 | `HEBS_GATE_TRI` |
+| 10 | `HEBS_GATE_VCC` |
+| 11 | `HEBS_GATE_GND` |
+| 12 | `HEBS_GATE_PUP` |
+| 13 | `HEBS_GATE_PDN` |
 
 ### 5.2 Structs
 
@@ -889,4 +896,8 @@ Canonical v05 notes:
    - global mean GEPS: `284269232.16`
    - c6288 p50 GEPS: `352790933.62`
    - c6288 CRC32: `0x90B28CB8`
+6. Combinational gate matrix expanded in parser + executor:
+   - Added loader/engine support for `XOR`, `XNOR`, `TRI`/`TRISTATE`, `VCC`, `GND`, `PUP`/`PULLUP`, `PDN`/`PULLDOWN`.
+   - Unknown gate opcodes now fail bench load instead of silently degrading to `BUF`.
+   - Added weak pull-down primitive path (`hebs_gate_weak_pull_down_simd`, `hebs_eval_weak_pull_down`) for `PDN`.
 

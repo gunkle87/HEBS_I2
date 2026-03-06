@@ -21,6 +21,7 @@ typedef struct hebs_gate_raw_s
 	uint32_t level;
 	uint8_t input_count;
 	uint8_t is_stateful;
+	uint8_t parse_ok;
 
 } hebs_gate_raw_t;
 
@@ -275,10 +276,11 @@ static int hebs_extract_name_in_parens(const char* text, char* out, size_t out_s
 
 }
 
-static hebs_gate_type_t hebs_parse_gate_type(const char* op, uint8_t* input_count, uint8_t* is_stateful)
+static hebs_gate_type_t hebs_parse_gate_type(const char* op, uint8_t* input_count, uint8_t* is_stateful, uint8_t* is_valid)
 {
 	*input_count = 2U;
 	*is_stateful = 0U;
+	*is_valid = 1U;
 
 	if (strcmp(op, "AND") == 0)
 	{
@@ -319,14 +321,60 @@ static hebs_gate_type_t hebs_parse_gate_type(const char* op, uint8_t* input_coun
 
 	}
 
-	if (strcmp(op, "BUF") == 0)
+	if (strcmp(op, "BUF") == 0 || strcmp(op, "BUFF") == 0)
 	{
 		*input_count = 1U;
 		return HEBS_GATE_BUF;
 
 	}
 
-	*input_count = 1U;
+	if (strcmp(op, "XOR") == 0)
+	{
+		return HEBS_GATE_XOR;
+
+	}
+
+	if (strcmp(op, "XNOR") == 0)
+	{
+		return HEBS_GATE_XNOR;
+
+	}
+
+	if (strcmp(op, "TRI") == 0 || strcmp(op, "TRISTATE") == 0)
+	{
+		return HEBS_GATE_TRI;
+
+	}
+
+	if (strcmp(op, "VCC") == 0)
+	{
+		*input_count = 0U;
+		return HEBS_GATE_VCC;
+
+	}
+
+	if (strcmp(op, "GND") == 0)
+	{
+		*input_count = 0U;
+		return HEBS_GATE_GND;
+
+	}
+
+	if (strcmp(op, "PUP") == 0 || strcmp(op, "PULLUP") == 0)
+	{
+		*input_count = 1U;
+		return HEBS_GATE_PUP;
+
+	}
+
+	if (strcmp(op, "PDN") == 0 || strcmp(op, "PULLDOWN") == 0)
+	{
+		*input_count = 1U;
+		return HEBS_GATE_PDN;
+
+	}
+
+	*is_valid = 0U;
 	return HEBS_GATE_BUF;
 
 }
@@ -355,6 +403,7 @@ static int hebs_parse_gate_line(
 	int ok;
 	uint8_t input_count;
 	uint8_t is_stateful;
+	uint8_t parse_ok;
 
 	eq = strchr(line, '=');
 	if (!eq)
@@ -404,7 +453,12 @@ static int hebs_parse_gate_line(
 	comma = strchr(rhs_args, ',');
 
 	memset(&gate, 0, sizeof(gate));
-	gate.type = hebs_parse_gate_type(op, &input_count, &is_stateful);
+	gate.type = hebs_parse_gate_type(op, &input_count, &is_stateful, &parse_ok);
+	if (!parse_ok)
+	{
+		return 0;
+
+	}
 	gate.input_count = input_count;
 	gate.is_stateful = is_stateful;
 
@@ -415,7 +469,19 @@ static int hebs_parse_gate_line(
 
 	}
 
-	if (comma)
+	if (gate.input_count == 0U)
+	{
+		char* trimmed_args = hebs_trim(rhs_args);
+		if (*trimmed_args != '\0')
+		{
+			return 0;
+
+		}
+
+		src_a_name[0] = '\0';
+		src_b_name[0] = '\0';
+	}
+	else if (comma)
 	{
 		char* trimmed_a;
 		char* trimmed_b;
@@ -433,6 +499,12 @@ static int hebs_parse_gate_line(
 
 		}
 
+		if (gate.input_count == 1U)
+		{
+			return 0;
+
+		}
+
 		memcpy(src_a_name, trimmed_a, len_a + 1U);
 		memcpy(src_b_name, trimmed_b, len_b + 1U);
 	}
@@ -440,6 +512,11 @@ static int hebs_parse_gate_line(
 	{
 		char* trimmed_a = hebs_trim(rhs_args);
 		size_t len_a = strlen(trimmed_a);
+		if (gate.input_count > 1U)
+		{
+			return 0;
+
+		}
 		if (len_a >= sizeof(src_a_name))
 		{
 			return 0;
@@ -450,20 +527,29 @@ static int hebs_parse_gate_line(
 		src_b_name[0] = '\0';
 	}
 
-	src_a_id = hebs_signal_get_or_add(signals, src_a_name, &ok);
-	if (!ok)
+	if (gate.input_count == 0U)
 	{
-		return 0;
-
+		src_a_id = dst_id;
+		src_b_id = dst_id;
 	}
-
-	src_b_id = src_a_id;
-	if (gate.input_count > 1U)
+	else
 	{
-		src_b_id = hebs_signal_get_or_add(signals, src_b_name, &ok);
+		src_a_id = hebs_signal_get_or_add(signals, src_a_name, &ok);
 		if (!ok)
 		{
 			return 0;
+
+		}
+
+		src_b_id = src_a_id;
+		if (gate.input_count > 1U)
+		{
+			src_b_id = hebs_signal_get_or_add(signals, src_b_name, &ok);
+			if (!ok)
+			{
+				return 0;
+
+			}
 
 		}
 
@@ -603,11 +689,15 @@ static uint32_t hebs_levelize_and_pack(hebs_plan* plan, hebs_gate_raw_t* gates, 
 	total_fanout_edges = 0U;
 	for (gate_idx = 0; gate_idx < gate_count; ++gate_idx)
 	{
-		++fanout_counts[gates[gate_idx].src_a];
-		++total_fanout_edges;
-		if (fanout_counts[gates[gate_idx].src_a] > fanout_max)
+		if (gates[gate_idx].input_count > 0U)
 		{
-			fanout_max = fanout_counts[gates[gate_idx].src_a];
+			++fanout_counts[gates[gate_idx].src_a];
+			++total_fanout_edges;
+			if (fanout_counts[gates[gate_idx].src_a] > fanout_max)
+			{
+				fanout_max = fanout_counts[gates[gate_idx].src_a];
+
+			}
 
 		}
 
@@ -632,7 +722,7 @@ static uint32_t hebs_levelize_and_pack(hebs_plan* plan, hebs_gate_raw_t* gates, 
 		for (gate_idx = 0; gate_idx < gate_count; ++gate_idx)
 		{
 			hebs_gate_raw_t* gate = &gates[gate_idx];
-			uint32_t src_a_level = net_levels[gate->src_a];
+			uint32_t src_a_level = (gate->input_count > 0U) ? net_levels[gate->src_a] : 0U;
 			uint32_t src_b_level = (gate->input_count > 1U) ? net_levels[gate->src_b] : src_a_level;
 			uint32_t gate_level;
 			uint32_t dst_level;
@@ -900,10 +990,17 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 	{
 		(uint8_t)HEBS_GATE_AND,
 		(uint8_t)HEBS_GATE_OR,
+		(uint8_t)HEBS_GATE_XOR,
 		(uint8_t)HEBS_GATE_NOT,
 		(uint8_t)HEBS_GATE_NAND,
 		(uint8_t)HEBS_GATE_NOR,
-		(uint8_t)HEBS_GATE_BUF
+		(uint8_t)HEBS_GATE_XNOR,
+		(uint8_t)HEBS_GATE_BUF,
+		(uint8_t)HEBS_GATE_TRI,
+		(uint8_t)HEBS_GATE_VCC,
+		(uint8_t)HEBS_GATE_GND,
+		(uint8_t)HEBS_GATE_PUP,
+		(uint8_t)HEBS_GATE_PDN
 	};
 	uint32_t level;
 	uint32_t order_idx;

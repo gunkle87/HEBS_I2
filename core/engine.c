@@ -312,6 +312,273 @@ static void hebs_execute_buf_chunk(
 
 }
 
+static void hebs_execute_xor_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+		const uint64_t out_lane = hebs_gate_xor_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
+static void hebs_execute_xnor_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+		const uint64_t out_lane = hebs_gate_xnor_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
+static void hebs_execute_tri_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t data_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t enable_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+		const uint64_t out_lane = hebs_gate_tristate_simd(data_lane, enable_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
+static void hebs_execute_vcc_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t out_lane = hebs_gate_vcc_simd() & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
+static void hebs_execute_gnd_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t out_lane = hebs_gate_gnd_simd() & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
+static void hebs_execute_pup_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t out_lane = hebs_gate_weak_pull_simd(a_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
+static void hebs_execute_pdn_chunk(
+	hebs_engine* ctx,
+	const hebs_plan* plan,
+	uint32_t chunk_start,
+	uint32_t chunk_count,
+	uint8_t* dirty_trays)
+{
+	uint32_t idx;
+	const hebs_exec_instruction_t* exec_base;
+	uint64_t* trays;
+
+	if (chunk_count == 0U)
+	{
+		return;
+
+	}
+
+	exec_base = &plan->comb_exec_data[chunk_start];
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
+	for (idx = 0U; idx < chunk_count; ++idx)
+	{
+		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
+		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t out_lane = hebs_gate_weak_pull_down_simd(a_lane) & 0x3ULL;
+		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		dirty_trays[exec_instr->dst_tray] = 1U;
+
+	}
+
+	ctx->gate_evals += chunk_count;
+	ctx->signal_writes_committed += chunk_count;
+
+}
+
 static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan* plan, uint8_t* dirty_trays)
 {
 	uint32_t span_idx;
@@ -327,6 +594,9 @@ static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan
 			case HEBS_GATE_OR:
 				hebs_execute_or_chunk(ctx, plan, span->start, span->count, dirty_trays);
 				break;
+			case HEBS_GATE_XOR:
+				hebs_execute_xor_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
 			case HEBS_GATE_NOT:
 				hebs_execute_not_chunk(ctx, plan, span->start, span->count, dirty_trays);
 				break;
@@ -336,8 +606,26 @@ static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan
 			case HEBS_GATE_NOR:
 				hebs_execute_nor_chunk(ctx, plan, span->start, span->count, dirty_trays);
 				break;
+			case HEBS_GATE_XNOR:
+				hebs_execute_xnor_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
 			case HEBS_GATE_BUF:
 				hebs_execute_buf_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
+			case HEBS_GATE_TRI:
+				hebs_execute_tri_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
+			case HEBS_GATE_VCC:
+				hebs_execute_vcc_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
+			case HEBS_GATE_GND:
+				hebs_execute_gnd_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
+			case HEBS_GATE_PUP:
+				hebs_execute_pup_chunk(ctx, plan, span->start, span->count, dirty_trays);
+				break;
+			case HEBS_GATE_PDN:
+				hebs_execute_pdn_chunk(ctx, plan, span->start, span->count, dirty_trays);
 				break;
 			default:
 				break;
@@ -373,6 +661,12 @@ static void hebs_execute_combinational_fallback(hebs_engine* ctx, const hebs_pla
 				result = hebs_eval_or(a, b);
 				break;
 			}
+			case HEBS_GATE_XOR:
+			{
+				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
+				result = hebs_eval_xor(a, b);
+				break;
+			}
 			case HEBS_GATE_NOT:
 				result = hebs_eval_not(a);
 				break;
@@ -388,8 +682,32 @@ static void hebs_execute_combinational_fallback(hebs_engine* ctx, const hebs_pla
 				result = hebs_eval_not(hebs_eval_or(a, b));
 				break;
 			}
+			case HEBS_GATE_XNOR:
+			{
+				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
+				result = hebs_eval_xnor(a, b);
+				break;
+			}
 			case HEBS_GATE_BUF:
 				result = a;
+				break;
+			case HEBS_GATE_TRI:
+			{
+				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
+				result = hebs_eval_tristate(a, b);
+				break;
+			}
+			case HEBS_GATE_VCC:
+				result = hebs_eval_vcc();
+				break;
+			case HEBS_GATE_GND:
+				result = hebs_eval_gnd();
+				break;
+			case HEBS_GATE_PUP:
+				result = hebs_eval_weak_pull(a);
+				break;
+			case HEBS_GATE_PDN:
+				result = hebs_eval_weak_pull_down(a);
 				break;
 			case HEBS_GATE_DFF:
 				continue;

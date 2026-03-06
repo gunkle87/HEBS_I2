@@ -43,11 +43,18 @@ typedef enum hebs_gate_type_e
 	HEBS_GATE_NAND = 3,
 	HEBS_GATE_NOR = 4,
 	HEBS_GATE_BUF = 5,
-	HEBS_GATE_DFF = 6
+	HEBS_GATE_DFF = 6,
+	HEBS_GATE_XOR = 7,
+	HEBS_GATE_XNOR = 8,
+	HEBS_GATE_TRI = 9,
+	HEBS_GATE_VCC = 10,
+	HEBS_GATE_GND = 11,
+	HEBS_GATE_PUP = 12,
+	HEBS_GATE_PDN = 13
 
 } hebs_gate_type_t;
 
-#define HEBS_COMB_GATE_TYPE_COUNT 6U
+#define HEBS_COMB_GATE_TYPE_COUNT 13U
 
 typedef struct hebs_lep_instruction_s
 {
