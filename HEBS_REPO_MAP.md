@@ -72,7 +72,7 @@ It covers:
 
 | File | Role | Key Symbols |
 |---|---|---|
-| `benchmarks/runner.c` | Benchmark executor, warmup, 10-iteration protocol, CSV/HTML output. | runner constants (`REVISION_NAME=Revision_Optimized_v03`, `ANCHOR_REVISION_TOKEN=Revision_Structure_v07`, `C6288_CRC_LOCK=0x90B28CB8`), fixed 10-bench anchor target list, `hebs_run_single_bench`, `main` |
+| `benchmarks/runner.c` | Benchmark executor, warmup, 10-iteration protocol, CSV/HTML output. | profile-aware CSV path (`metrics_history.csv` perf / `metrics_history_compat.csv` compat), fixed 10-bench anchor target list, `hebs_run_single_bench`, `main` |
 | `benchmarks/protocol_helper.h` | Statistical helpers (median/percentiles/ICF). | `calculate_p50`, `calculate_percentile`, `calculate_icf` |
 | `benchmarks/report_types.h` | Metric row schema. | `hebs_metric_row_s` (`:6`) |
 | `benchmarks/timing_helper.h` | High-resolution timer wrapper. | `hebs_timer_s` (`:6`) |
@@ -92,6 +92,7 @@ It covers:
 | `benchmarks/benches/ISCAS89/s5378.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/benches/ISCAS89/s820.bench` | Benchmark netlist | ISCAS89 sample |
 | `benchmarks/results/metrics_history.csv` | Historical metric ledger | revision blocks + per-bench rows |
+| `benchmarks/results/metrics_history_compat.csv` | Compatibility metric ledger | non-canonical compatibility-profile revision blocks + per-bench rows |
 | `benchmarks/results/revision_structure.html` | HTML benchmark report | legacy Revision_Structure artifact |
 | `benchmarks/results/revision_combinational_v01.html` | HTML benchmark report | prior combinational artifact |
 | `benchmarks/results/revision_combinational_v02.html` | HTML benchmark report | prior combinational artifact |
@@ -101,7 +102,10 @@ It covers:
 | `benchmarks/results/archive/non_canon_passB_2026-03-06.md` | Non-canon tuning archive | removed Pass B threshold-packing run block for historical reference |
 | `benchmarks/results/revision_optimized_v01.html` | HTML benchmark report | prior optimized artifact |
 | `benchmarks/results/revision_optimized_v02.html` | HTML benchmark report | prior optimized artifact |
-| `benchmarks/results/revision_optimized_v03.html` | HTML benchmark report | active optimized artifact |
+| `benchmarks/results/revision_optimized_v03.html` | HTML benchmark report | prior optimized artifact |
+| `benchmarks/results/probe_fix_v04_v01.html` | HTML benchmark report | `probe_fix_v04` perf-profile artifact |
+| `benchmarks/results/probe_fix_v05_v01.html` | HTML benchmark report | `probe_fix_v05` perf-profile artifact (expected in Run 3) |
+| `benchmarks/results/probe_fix_v05_compat_v01.html` | HTML benchmark report | `probe_fix_v05_compat` compatibility-profile artifact (expected in Run 3) |
 
 ### 3.5 `/tests`
 
@@ -200,7 +204,7 @@ It covers:
 - Exposed probe snapshot: `input_apply`, `input_toggle`, `tray_exec`, `chunk_exec`, `gate_eval`, `state_write_commit`, `state_change_commit`, `dff_exec`
 
 #### Benchmark data structs
-- `hebs_metric_row_t` (`benchmarks/report_types.h:6`): full benchmark output schema.
+- `hebs_metric_row_t` (`benchmarks/report_types.h:6`): full benchmark output schema including profile metadata fields (`probe_profile`, `compat_metrics_enabled`).
 - `hebs_timer_t` (`benchmarks/timing_helper.h:6`): QPC timer state.
 
 ### 5.3 Constants
@@ -213,13 +217,14 @@ It covers:
 #### Runner protocol constants (`benchmarks/runner.c`)
 - `ITERATIONS = 10`
 - `WARMUP_SECONDS = 5.0`
-- `SIM_CYCLES = 2000`
+- `SIM_CYCLES = 1000` (default, compile-time override)
 - `BENCH_ROOT = "benchmarks/benches/"`
-- `REVISION_NAME = "Revision_Optimized_v03"`
-- `ANCHOR_REVISION_TOKEN = "Revision_Structure_v07"`
-- `METRICS_CSV_PATH = "benchmarks/results/metrics_history.csv"`
-- `REPORT_HTML_PATH = "benchmarks/results/revision_optimized_v03.html"`
-- `C6288_CRC_LOCK = 0x90B28CB8`
+- `REVISION_NAME = "Revision_Combinational_v05"` (default, compile-time override)
+- `HEBS_ANCHOR_TOKEN = "Revision_Structure_v07"`
+- `METRICS_CSV_PATH` default:
+  - perf profile: `benchmarks/results/metrics_history.csv`
+  - compat profile: `benchmarks/results/metrics_history_compat.csv`
+- `REPORT_HTML_PATH = "benchmarks/results/revision_combinational_v05.html"` (default, compile-time override)
 - fixed target set (10 benches): `c17,c432,c499,c6288,c880,s27,s298,s382,s526,s820`
 
 ## 6. Public API Usage Language
@@ -779,6 +784,7 @@ C:\DEV\HEBS_I2
 11. Canonical and compatibility benchmark histories are separated:
    - canonical: `benchmarks/results/metrics_history.csv`
    - compatibility-only: `benchmarks/results/metrics_history_compat.csv`
+   - compatibility run tokens use `_compat` suffix (example: `probe_fix_v05_compat`).
 12. Normative references must explicitly distinguish test suite rules from benchmark suite rules when behavior differs by profile.
 13. Probe-fix minor revision naming is flat-token only (`probe_fix_vNN`); nested suffix naming is non-canonical.
 

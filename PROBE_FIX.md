@@ -102,6 +102,7 @@ Required rule:
   - `benchmarks/results/metrics_history.csv`
 - compat profile benchmark suite runs append to non-canonical ledger:
   - `benchmarks/results/metrics_history_compat.csv`
+  - compat run revision tokens must use `_compat` suffix (example: `probe_fix_v05_compat`)
 
 Canonical regression history must contain perf profile runs only.
 

@@ -30,7 +30,11 @@
 #define REVISION_NAME "Revision_Combinational_v05"
 #endif
 #ifndef METRICS_CSV_PATH
+#if HEBS_COMPAT_PROBES_ENABLED
+#define METRICS_CSV_PATH "benchmarks/results/metrics_history_compat.csv"
+#else
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
+#endif
 #endif
 #ifndef REPORT_HTML_PATH
 #define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v05.html"
@@ -68,6 +72,16 @@ static const hebs_bench_target_t HEBS_BENCH_TARGETS[] =
 static const char* HEBS_ANCHOR_TOKEN = "Revision_Structure_v07";
 static double HEBS_ANCHOR_GEPS_MEAN = 0.0;
 static int HEBS_ANCHOR_GEPS_VALID = 0;
+
+static const char* hebs_probe_profile_name(void)
+{
+#if HEBS_COMPAT_PROBES_ENABLED
+	return "compat";
+#else
+	return "perf";
+#endif
+
+}
 
 static const char* hebs_basename_ptr(const char* path)
 {
@@ -541,6 +555,8 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 
 	memset(out_row, 0, sizeof(*out_row));
 	snprintf(out_row->suite_name, sizeof(out_row->suite_name), "%s", suite_name);
+	snprintf(out_row->probe_profile, sizeof(out_row->probe_profile), "%s", hebs_probe_profile_name());
+	out_row->compat_metrics_enabled = (uint8_t)HEBS_COMPAT_PROBES_ENABLED;
 	total_toggles = 0U;
 	total_primary_input_transitions = 0U;
 	total_internal_transitions = 0U;
@@ -630,9 +646,15 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 
 	out_row->logic_fingerprint = stable_crc;
 	out_row->fingerprint_stable = (uint8_t)crc_stable;
+#if HEBS_COMPAT_PROBES_ENABLED
 	out_row->total_toggles = total_toggles;
 	out_row->primary_input_transitions = total_primary_input_transitions;
 	out_row->internal_transitions = total_internal_transitions;
+#else
+	out_row->total_toggles = 0U;
+	out_row->primary_input_transitions = 0U;
+	out_row->internal_transitions = 0U;
+#endif
 	hebs_finalize_metric_row(out_row, runtimes, geps_runs);
 	hebs_apply_history_and_guardrail(out_row);
 
@@ -653,6 +675,7 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 	}
 	printf("Base/Prev/Cur ICF: %.6f / %.6f / %.6f\n", out_row->base_icf, out_row->prev_icf, out_row->icf);
 	printf("GEPS Delta Prev vs Cur: %.2f%%\n", out_row->geps_delta_prev_pct);
+	printf("Probe Profile: %s (compat_metrics_enabled=%u)\n", out_row->probe_profile, out_row->compat_metrics_enabled);
 	printf("Logic CRC32: 0x%08X (stable=%s)\n", (unsigned int)out_row->logic_fingerprint, out_row->fingerprint_stable ? "YES" : "NO");
 	printf("---------------------------------\n");
 	return 1;

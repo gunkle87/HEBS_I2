@@ -1,5 +1,5 @@
 # HEBS Canonical Testing & Benchmarking Protocol
-Version: 1.4.1
+Version: 1.4.2
 Status: MANDATORY
 Authority: HEBS_SNAPSHOT.md
 
@@ -135,6 +135,7 @@ If code exists to measure engine behavior rather than perform simulation behavio
 * **Canonical Artifact Separation**:
     * Canonical perf-profile benchmark runs append only to `benchmarks/results/metrics_history.csv`.
     * Compat-profile benchmark runs append only to `benchmarks/results/metrics_history_compat.csv`.
+    * Compat-profile revision tokens must use `_compat` suffix (example: `probe_fix_v05_compat`).
     * Canonical regression history must contain perf-profile runs only.
 * **Regression Authority**:
     * Canonical regression gates remain based on GEPS, latency/runtime statistics, and CRC/correctness stability.
