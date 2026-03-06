@@ -6,6 +6,7 @@
 #include <math.h>
 #include <windows.h>
 #include "hebs_engine.h"
+#include "primitives.h"
 #include "timing_helper.h"
 #include "protocol_helper.h"
 #include "report_types.h"
@@ -20,11 +21,13 @@
 #define BENCH_ROOT "benchmarks/benches/"
 #define MAX_BENCH_RESULTS 256
 #ifndef REVISION_NAME
-#define REVISION_NAME "Revision_Combinational_v01"
+#define REVISION_NAME "Revision_Combinational_v02"
 #endif
+#ifndef METRICS_CSV_PATH
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
+#endif
 #ifndef REPORT_HTML_PATH
-#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v01.html"
+#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v02.html"
 #endif
 
 typedef struct hebs_bench_target_s
@@ -49,6 +52,10 @@ static const hebs_bench_target_t HEBS_BENCH_TARGETS[] =
 };
 
 #define HEBS_BENCH_TARGET_COUNT (sizeof(HEBS_BENCH_TARGETS) / sizeof(HEBS_BENCH_TARGETS[0]))
+
+static const char* HEBS_ANCHOR_TOKEN = "Revision_Structure_v07";
+static double HEBS_ANCHOR_GEPS_MEAN = 0.0;
+static int HEBS_ANCHOR_GEPS_VALID = 0;
 
 static const char* hebs_basename_ptr(const char* path)
 {
@@ -82,6 +89,136 @@ static const char* hebs_basename_ptr(const char* path)
 	}
 
 	return base;
+
+}
+
+static void hebs_profile_c6288_hot_path(void)
+{
+	const char* bench_path;
+	hebs_plan* plan;
+	hebs_engine engine;
+	const uint32_t repeats = 3000U;
+	hebs_timer_t timer;
+	volatile uint64_t sink;
+	uint64_t overhead_gate_equiv_ops;
+	uint64_t gate_ops;
+	uint32_t repeat_idx;
+	double overhead_sec;
+	double nand_sec;
+	double xor_sec;
+	double overhead_ns_per_gate_equiv;
+	double nand_ns_per_op;
+	double xor_ns_per_op;
+	double overhead_share_pct;
+	uint32_t tray_idx;
+
+	bench_path = "benchmarks/benches/ISCAS85/c6288.bench";
+	plan = hebs_load_bench(bench_path);
+	if (!plan)
+	{
+		return;
+
+	}
+
+	memset(&engine, 0, sizeof(engine));
+	if (hebs_init_engine(&engine, plan) != HEBS_OK || plan->comb_instruction_count == 0U)
+	{
+		hebs_free_plan(plan);
+		return;
+
+	}
+
+	for (tray_idx = 0U; tray_idx < plan->tray_count; ++tray_idx)
+	{
+		engine.signal_trays[tray_idx] = 0x5555555555555555ULL ^ ((uint64_t)tray_idx * 0x0101010101010101ULL);
+		engine.next_signal_trays[tray_idx] = engine.signal_trays[tray_idx];
+
+	}
+
+	sink = 0U;
+	overhead_gate_equiv_ops = 0U;
+	timer_start(&timer);
+	for (repeat_idx = 0U; repeat_idx < repeats; ++repeat_idx)
+	{
+		uint32_t span_idx;
+		for (span_idx = 0U; span_idx < plan->comb_span_count; ++span_idx)
+		{
+			const hebs_gate_span_t* span = &plan->comb_spans[span_idx];
+			uint32_t processed = 0U;
+			while (processed < span->count)
+			{
+				const uint32_t chunk_count = ((span->count - processed) > 64U) ? 64U : (span->count - processed);
+				const uint32_t chunk_start = span->start + processed;
+				uint32_t idx;
+				for (idx = 0U; idx < chunk_count; ++idx)
+				{
+					const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[chunk_start + idx];
+					sink ^= (uint64_t)exec_instr->dst_tray;
+
+				}
+
+				processed += chunk_count;
+				overhead_gate_equiv_ops += chunk_count;
+
+			}
+
+		}
+
+	}
+	timer_stop(&timer);
+	overhead_sec = timer_elapsed_sec(&timer);
+
+	sink ^= (uint64_t)plan->comb_instruction_count;
+	gate_ops = (uint64_t)plan->comb_instruction_count * (uint64_t)repeats;
+	timer_start(&timer);
+	for (repeat_idx = 0U; repeat_idx < repeats; ++repeat_idx)
+	{
+		uint32_t instr_idx;
+		for (instr_idx = 0U; instr_idx < plan->comb_instruction_count; ++instr_idx)
+		{
+			const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[instr_idx];
+			const uint64_t a_lane = (engine.signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+			const uint64_t b_lane = (engine.signal_trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+			sink ^= hebs_gate_nand_simd(a_lane, b_lane);
+
+		}
+
+	}
+	timer_stop(&timer);
+	nand_sec = timer_elapsed_sec(&timer);
+
+	timer_start(&timer);
+	for (repeat_idx = 0U; repeat_idx < repeats; ++repeat_idx)
+	{
+		uint32_t instr_idx;
+		for (instr_idx = 0U; instr_idx < plan->comb_instruction_count; ++instr_idx)
+		{
+			const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[instr_idx];
+			const uint64_t a_lane = (engine.signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+			const uint64_t b_lane = (engine.signal_trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+			sink ^= hebs_gate_xor_simd(a_lane, b_lane);
+
+		}
+
+	}
+	timer_stop(&timer);
+	xor_sec = timer_elapsed_sec(&timer);
+
+	overhead_ns_per_gate_equiv = (overhead_gate_equiv_ops > 0U) ? ((overhead_sec * 1.0e9) / (double)overhead_gate_equiv_ops) : 0.0;
+	nand_ns_per_op = (gate_ops > 0U) ? ((nand_sec * 1.0e9) / (double)gate_ops) : 0.0;
+	xor_ns_per_op = (gate_ops > 0U) ? ((xor_sec * 1.0e9) / (double)gate_ops) : 0.0;
+	overhead_share_pct = ((overhead_ns_per_gate_equiv + nand_ns_per_op) > 0.0)
+		? (100.0 * overhead_ns_per_gate_equiv / (overhead_ns_per_gate_equiv + nand_ns_per_op))
+		: 0.0;
+
+	printf("\nHOT PATH PROFILE (c6288)\n");
+	printf("Batch overhead ns/gate-equiv: %.3f\n", overhead_ns_per_gate_equiv);
+	printf("NAND math ns/op: %.3f\n", nand_ns_per_op);
+	printf("XOR math ns/op: %.3f\n", xor_ns_per_op);
+	printf("Overhead share vs NAND path: %.2f%%\n", overhead_share_pct);
+	printf("Profile sink: 0x%llX\n", (unsigned long long)sink);
+
+	hebs_free_plan(plan);
 
 }
 
@@ -315,6 +452,11 @@ static void hebs_apply_history_and_guardrail(hebs_metric_row_t* row)
 	row->prev_geps_p50 = prev_geps;
 	row->base_icf = base_icf;
 	row->prev_icf = prev_icf;
+	if (HEBS_ANCHOR_GEPS_VALID && strncmp(REVISION_NAME, "Revision_Combinational_", 23U) == 0)
+	{
+		row->base_geps_p50 = HEBS_ANCHOR_GEPS_MEAN;
+
+	}
 
 	if (prev_geps > 0.0)
 	{
@@ -461,6 +603,12 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 	printf("Propagation Depth: %u\n", out_row->propagation_depth);
 	printf("Fanout Max: %u\n", out_row->fanout_max);
 	printf("Base/Prev/Cur GEPS: %.2f / %.2f / %.2f\n", out_row->base_geps_p50, out_row->prev_geps_p50, out_row->geps_p50);
+	if (HEBS_ANCHOR_GEPS_VALID && strncmp(REVISION_NAME, "Revision_Combinational_", 23U) == 0 && out_row->base_geps_p50 > 0.0)
+	{
+		double anchor_delta = ((out_row->geps_p50 - out_row->base_geps_p50) / out_row->base_geps_p50) * 100.0;
+		printf("GEPS Delta Anchor vs Cur: %.2f%%\n", anchor_delta);
+
+	}
 	printf("Base/Prev/Cur ICF: %.6f / %.6f / %.6f\n", out_row->base_icf, out_row->prev_icf, out_row->icf);
 	printf("GEPS Delta Prev vs Cur: %.2f%%\n", out_row->geps_delta_prev_pct);
 	printf("Logic CRC32: 0x%08X (stable=%s)\n", (unsigned int)out_row->logic_fingerprint, out_row->fingerprint_stable ? "YES" : "NO");
@@ -483,6 +631,19 @@ int main(void)
 	failures = 0;
 
 	hebs_warmup();
+	if (lookup_revision_mean_geps(METRICS_CSV_PATH, HEBS_ANCHOR_TOKEN, &HEBS_ANCHOR_GEPS_MEAN))
+	{
+		HEBS_ANCHOR_GEPS_VALID = 1;
+		printf("Anchor GEPS (%s mean): %.2f\n", HEBS_ANCHOR_TOKEN, HEBS_ANCHOR_GEPS_MEAN);
+
+	}
+	else
+	{
+		HEBS_ANCHOR_GEPS_VALID = 0;
+
+	}
+
+	hebs_profile_c6288_hot_path();
 	hebs_get_run_clock(timestamp, sizeof(timestamp), date_text, sizeof(date_text));
 	hebs_get_git_commit_hash(git_hash, sizeof(git_hash));
 

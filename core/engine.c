@@ -78,16 +78,20 @@ static void hebs_execute_binary_chunk(
 	hebs_binary_gate_simd_fn eval_fn)
 {
 	uint32_t idx;
+	uint64_t* trays;
 
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
 	for (idx = 0U; idx < chunk_count; ++idx)
 	{
 		const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[chunk_start + idx];
-		const uint64_t a_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (ctx->next_signal_trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
+		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
 		const uint64_t out_lane = eval_fn(a_lane, b_lane) & 0x3ULL;
 		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
-		const uint64_t tray_value = ctx->next_signal_trays[exec_instr->dst_tray];
-		ctx->next_signal_trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
 
 	}
 
@@ -104,15 +108,19 @@ static void hebs_execute_unary_chunk(
 	hebs_unary_gate_simd_fn eval_fn)
 {
 	uint32_t idx;
+	uint64_t* trays;
 
+	trays = ctx->next_signal_trays;
+
+#pragma GCC unroll 4
 	for (idx = 0U; idx < chunk_count; ++idx)
 	{
 		const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[chunk_start + idx];
-		const uint64_t a_lane = (ctx->next_signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
+		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t out_lane = eval_fn(a_lane) & 0x3ULL;
 		const uint64_t shifted_lane = out_lane << exec_instr->dst_shift;
-		const uint64_t tray_value = ctx->next_signal_trays[exec_instr->dst_tray];
-		ctx->next_signal_trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
+		const uint64_t tray_value = trays[exec_instr->dst_tray];
+		trays[exec_instr->dst_tray] = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
 
 	}
 

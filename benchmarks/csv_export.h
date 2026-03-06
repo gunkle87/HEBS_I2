@@ -214,6 +214,94 @@ static int lookup_history_for_bench_suite(
 
 }
 
+static int lookup_revision_mean_geps(
+	const char* csv_path,
+	const char* revision_token,
+	double* out_mean_geps)
+{
+	FILE* file;
+	char line[4096];
+	char token_prefix[256];
+	double running_sum;
+	uint32_t running_count;
+	int in_target_block;
+
+	if (!csv_path || !revision_token || !out_mean_geps)
+	{
+		return 0;
+
+	}
+
+	file = fopen(csv_path, "r");
+	if (!file)
+	{
+		return 0;
+
+	}
+
+	snprintf(token_prefix, sizeof(token_prefix), "%s |", revision_token);
+	running_sum = 0.0;
+	running_count = 0U;
+	in_target_block = 0;
+
+	while (fgets(line, (int)sizeof(line), file))
+	{
+		char block_copy[4096];
+		char* trimmed;
+		if (strchr(line, '|') != NULL && strstr(line, ",") == NULL)
+		{
+			if (in_target_block && running_count > 0U)
+			{
+				*out_mean_geps = running_sum / (double)running_count;
+				fclose(file);
+				return 1;
+
+			}
+
+			snprintf(block_copy, sizeof(block_copy), "%s", line);
+			trimmed = hebs_csv_trim(block_copy);
+			in_target_block = (strncmp(trimmed, token_prefix, strlen(token_prefix)) == 0);
+			running_sum = 0.0;
+			running_count = 0U;
+			continue;
+
+		}
+
+		if (!in_target_block || strstr(line, "Suite") != NULL || line[0] == '\n' || line[0] == '\r')
+		{
+			continue;
+
+		}
+
+		{
+			char suite[64];
+			char bench[128];
+			double icf;
+			double geps;
+			if (hebs_parse_metric_line(line, suite, sizeof(suite), bench, sizeof(bench), &icf, &geps))
+			{
+				running_sum += geps;
+				++running_count;
+
+			}
+
+		}
+
+	}
+
+	if (in_target_block && running_count > 0U)
+	{
+		*out_mean_geps = running_sum / (double)running_count;
+		fclose(file);
+		return 1;
+
+	}
+
+	fclose(file);
+	return 0;
+
+}
+
 static int append_metrics_history_csv(
 	const hebs_metric_row_t* results,
 	int count,

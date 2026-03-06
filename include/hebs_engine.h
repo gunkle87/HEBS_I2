@@ -6,6 +6,12 @@
 #define HEBS_MAX_PRIMARY_INPUTS 4096
 #define HEBS_MAX_SIGNAL_TRAYS 4096
 
+#if defined(_MSC_VER)
+#define HEBS_ALIGN64 __declspec(align(64))
+#else
+#define HEBS_ALIGN64 __attribute__((aligned(64)))
+#endif
+
 typedef enum hebs_logic_e
 {
 	HEBS_S0 = 0,
@@ -124,9 +130,9 @@ typedef struct hebs_engine_s
 {
 	uint64_t current_tick;
 	uint32_t tray_count;
-	uint64_t tray_plane_a[HEBS_MAX_SIGNAL_TRAYS];
-	uint64_t tray_plane_b[HEBS_MAX_SIGNAL_TRAYS];
-	uint64_t dff_state_trays[HEBS_MAX_SIGNAL_TRAYS];
+	HEBS_ALIGN64 uint64_t tray_plane_a[HEBS_MAX_SIGNAL_TRAYS];
+	HEBS_ALIGN64 uint64_t tray_plane_b[HEBS_MAX_SIGNAL_TRAYS];
+	HEBS_ALIGN64 uint64_t dff_state_trays[HEBS_MAX_SIGNAL_TRAYS];
 	uint64_t* signal_trays;
 	uint64_t* next_signal_trays;
 	uint8_t previous_input_state[HEBS_MAX_PRIMARY_INPUTS];

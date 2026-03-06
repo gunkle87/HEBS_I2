@@ -790,3 +790,30 @@ Engine/data model changes:
 5. Fallback scalar combinational path retained:
    - `hebs_execute_combinational_fallback(...)`
 
+### Revision_Combinational_v02 (rebuild)
+
+Benchmark/anchor changes:
+1. Added revision-anchor lookup helper in CSV layer:
+   - `lookup_revision_mean_geps(...)` in `benchmarks/csv_export.h`
+2. `benchmarks/runner.c` now anchors `Base_GEPS` for combinational revisions to:
+   - token: `Revision_Structure_v07`
+   - anchor mean GEPS: first matching v07 block mean
+
+Hot-path profiling additions:
+1. Added c6288 profile helper in runner:
+   - `hebs_profile_c6288_hot_path(...)`
+2. Profile output reports:
+   - batch overhead ns per gate-equivalent
+   - NAND bit-plane math ns/op
+   - XOR bit-plane math ns/op
+   - overhead share vs NAND path
+
+Batch-loop tuning:
+1. Added 64-byte tray alignment macro:
+   - `HEBS_ALIGN64`
+2. Applied aligned trays to runtime buffers:
+   - `tray_plane_a`
+   - `tray_plane_b`
+   - `dff_state_trays`
+3. Added local tray pointer pinning and `#pragma GCC unroll 4` in chunk hot loops.
+
