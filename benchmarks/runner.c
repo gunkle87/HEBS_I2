@@ -20,11 +20,11 @@
 #define BENCH_ROOT "benchmarks/benches/"
 #define MAX_BENCH_RESULTS 256
 #ifndef REVISION_NAME
-#define REVISION_NAME "Revision_Combinational_v04"
+#define REVISION_NAME "Revision_Combinational_v05"
 #endif
 #define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
 #ifndef REPORT_HTML_PATH
-#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v04.html"
+#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v05.html"
 #endif
 
 typedef struct hebs_bench_target_s
@@ -564,3 +564,4 @@ int main(void)
 	return (failures == 0) ? 0 : 1;
 
 }
+
