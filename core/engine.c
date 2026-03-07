@@ -70,6 +70,51 @@ static void hebs_swap_active_trays(hebs_engine* ctx)
 
 }
 
+#define HEBS_LANE_LUT_INDEX(a, b) ((((uint32_t)(a) & 0x3U) << 2U) | ((uint32_t)(b) & 0x3U))
+
+/* 2-bit lane LUTs preserve current packed-lane gate behavior while reducing hot-loop decode math. */
+static const uint8_t HEBS_LUT_AND_2B[16] =
+{
+	0U, 0U, 2U, 2U, 0U, 1U, 2U, 3U, 2U, 2U, 2U, 2U, 2U, 3U, 2U, 3U
+};
+
+static const uint8_t HEBS_LUT_OR_2B[16] =
+{
+	0U, 1U, 0U, 1U, 1U, 1U, 1U, 1U, 0U, 1U, 2U, 3U, 1U, 1U, 3U, 3U
+};
+
+static const uint8_t HEBS_LUT_XOR_2B[16] =
+{
+	0U, 1U, 2U, 3U, 1U, 0U, 3U, 2U, 2U, 3U, 2U, 3U, 3U, 2U, 3U, 2U
+};
+
+static const uint8_t HEBS_LUT_NAND_2B[16] =
+{
+	1U, 1U, 3U, 3U, 1U, 0U, 3U, 2U, 3U, 3U, 3U, 3U, 3U, 2U, 3U, 2U
+};
+
+static const uint8_t HEBS_LUT_NOR_2B[16] =
+{
+	1U, 0U, 1U, 0U, 0U, 0U, 0U, 0U, 1U, 0U, 3U, 2U, 0U, 0U, 2U, 2U
+};
+
+static const uint8_t HEBS_LUT_XNOR_2B[16] =
+{
+	1U, 0U, 3U, 2U, 0U, 1U, 2U, 3U, 3U, 2U, 3U, 2U, 2U, 3U, 2U, 3U
+};
+
+static const uint8_t HEBS_LUT_TRI_2B[16] =
+{
+	0U, 0U, 0U, 0U, 0U, 1U, 0U, 1U, 0U, 2U, 0U, 2U, 0U, 3U, 0U, 3U
+};
+
+static const uint8_t HEBS_LUT_NOT_2B[4] = { 1U, 0U, 3U, 2U };
+static const uint8_t HEBS_LUT_BUF_2B[4] = { 0U, 1U, 2U, 3U };
+static const uint8_t HEBS_LUT_PUP_2B[4] = { 1U, 1U, 3U, 3U };
+static const uint8_t HEBS_LUT_PDN_2B[4] = { 0U, 0U, 2U, 2U };
+static const uint8_t HEBS_LUT_VCC_2B = 1U;
+static const uint8_t HEBS_LUT_GND_2B = 0U;
+
 static inline uint64_t hebs_commit_lane_write(
 	uint64_t* trays,
 	const hebs_exec_instruction_t* exec_instr,
@@ -125,7 +170,7 @@ static void hebs_execute_and_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_and_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_AND_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -160,7 +205,7 @@ static void hebs_execute_or_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_or_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_OR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -194,7 +239,7 @@ static void hebs_execute_not_chunk(
 	{
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_not_simd(a_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_NOT_2B[(uint32_t)a_lane & 0x3U];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -229,7 +274,7 @@ static void hebs_execute_nand_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_nand_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_NAND_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -264,7 +309,7 @@ static void hebs_execute_nor_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_nor_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_NOR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -298,7 +343,7 @@ static void hebs_execute_buf_chunk(
 	{
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_buf_simd(a_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_BUF_2B[(uint32_t)a_lane & 0x3U];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -333,7 +378,7 @@ static void hebs_execute_xor_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_xor_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_XOR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -368,7 +413,7 @@ static void hebs_execute_xnor_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_xnor_simd(a_lane, b_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_XNOR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -403,7 +448,7 @@ static void hebs_execute_tri_chunk(
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t data_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
 		const uint64_t enable_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_tristate_simd(data_lane, enable_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_TRI_2B[HEBS_LANE_LUT_INDEX(data_lane, enable_lane)];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -436,7 +481,7 @@ static void hebs_execute_vcc_chunk(
 	for (idx = 0U; idx < chunk_count; ++idx)
 	{
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t out_lane = hebs_gate_vcc_simd() & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_VCC_2B;
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -469,7 +514,7 @@ static void hebs_execute_gnd_chunk(
 	for (idx = 0U; idx < chunk_count; ++idx)
 	{
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t out_lane = hebs_gate_gnd_simd() & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_GND_2B;
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -503,7 +548,7 @@ static void hebs_execute_pup_chunk(
 	{
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_weak_pull_simd(a_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_PUP_2B[(uint32_t)a_lane & 0x3U];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
@@ -537,7 +582,7 @@ static void hebs_execute_pdn_chunk(
 	{
 		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
 		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = hebs_gate_weak_pull_down_simd(a_lane) & 0x3ULL;
+		const uint64_t out_lane = (uint64_t)HEBS_LUT_PDN_2B[(uint32_t)a_lane & 0x3U];
 		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
 
 	}
