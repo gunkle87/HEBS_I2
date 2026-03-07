@@ -273,6 +273,54 @@ static void test_extended_primitive_suite(void)
 
 }
 
+static void test_engine_fact_accessors(void)
+{
+	hebs_plan* plan = hebs_load_bench("benchmarks/benches/ISCAS85/c17.bench");
+	hebs_engine engine = { 0 };
+	hebs_plan_metadata metadata;
+	hebs_run_status status;
+	uint32_t crc_before;
+	uint32_t crc_after;
+
+	assert(plan != NULL);
+	assert(hebs_get_plan_hash(plan) == plan->lep_hash);
+	assert(hebs_get_plan_metadata(plan, &metadata) == 1);
+	assert(metadata.plan_hash == plan->lep_hash);
+	assert(metadata.gate_count == plan->gate_count);
+	assert(metadata.signal_count == plan->signal_count);
+	assert(metadata.tray_count == plan->tray_count);
+	assert(metadata.num_primary_inputs == plan->num_primary_inputs);
+	assert(hebs_get_plan_metadata(NULL, &metadata) == 0);
+	assert(hebs_get_plan_metadata(plan, NULL) == 0);
+	assert(hebs_get_plan_hash(NULL) == 0U);
+
+	assert(hebs_init_engine(&engine, plan) == HEBS_OK);
+	assert(hebs_get_run_status(&engine, &status) == 1);
+	assert(status.last_status == HEBS_OK);
+	assert(status.current_tick == 0U);
+	assert(status.tray_count == plan->tray_count);
+	assert(status.compat_metrics_enabled == (uint8_t)HEBS_COMPAT_PROBES_ENABLED);
+
+	crc_before = hebs_get_final_crc32(&engine);
+	assert(hebs_set_primary_input(&engine, plan, plan->num_primary_inputs, HEBS_S0) == HEBS_ERR_LOGIC);
+	assert(hebs_get_run_status(&engine, &status) == 1);
+	assert(status.last_status == HEBS_ERR_LOGIC);
+
+	assert(hebs_set_primary_input(&engine, plan, 0U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, plan);
+	assert(hebs_get_run_status(&engine, &status) == 1);
+	assert(status.last_status == HEBS_OK);
+	assert(status.current_tick == 1U);
+	assert(status.cycles_executed == 1U);
+	crc_after = hebs_get_final_crc32(&engine);
+	assert(crc_before != 0U || crc_after != 0U);
+	assert(hebs_get_final_crc32(NULL) == 0U);
+	assert(hebs_get_run_status(NULL, &status) == 0);
+	assert(hebs_get_run_status(&engine, NULL) == 0);
+	hebs_free_plan(plan);
+
+}
+
 int main(void)
 {
 	assert(HEBS_S1 == 1);
@@ -284,6 +332,7 @@ int main(void)
 	test_parallel_dff_tray_commit();
 	test_protocol_helper_stats();
 	test_extended_primitive_suite();
+	test_engine_fact_accessors();
 	return 0;
 
 }

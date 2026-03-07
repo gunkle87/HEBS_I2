@@ -247,58 +247,6 @@ static void hebs_warmup(double warmup_seconds)
 
 }
 
-static uint32_t hebs_crc32_bytes(const uint8_t* data, size_t len)
-{
-	uint32_t crc;
-	size_t i;
-	int bit;
-
-	crc = 0xFFFFFFFFU;
-	for (i = 0; i < len; ++i)
-	{
-		crc ^= (uint32_t)data[i];
-		for (bit = 0; bit < 8; ++bit)
-		{
-			uint32_t mask = (uint32_t)(-(int)(crc & 1U));
-			crc = (crc >> 1U) ^ (0xEDB88320U & mask);
-
-		}
-
-	}
-
-	return ~crc;
-
-}
-
-static uint32_t hebs_crc32_signal_trays(const hebs_engine* engine)
-{
-	uint64_t tray_shadow[HEBS_MAX_SIGNAL_TRAYS];
-	uint32_t tray_idx;
-
-	if (!engine)
-	{
-		return 0U;
-
-	}
-
-	for (tray_idx = 0U; tray_idx < engine->tray_count; ++tray_idx)
-	{
-		const uint64_t* tray_ptr = hebs_get_signal_tray(engine, tray_idx);
-		if (!tray_ptr)
-		{
-			tray_shadow[tray_idx] = 0ULL;
-			continue;
-
-		}
-
-		tray_shadow[tray_idx] = *tray_ptr;
-
-	}
-
-	return hebs_crc32_bytes((const uint8_t*)tray_shadow, (size_t)engine->tray_count * sizeof(uint64_t));
-
-}
-
 static void hebs_print_usage(const char* exe)
 {
 	printf("Usage:\n");
@@ -1083,9 +1031,9 @@ static int hebs_write_raw_row(
 	uint64_t plan_fingerprint,
 	uint32_t logic_crc32,
 	const hebs_probes* probes,
-	const hebs_plan* plan)
+	const hebs_plan_metadata* plan_metadata)
 {
-	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan)
+	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan_metadata)
 	{
 		return 0;
 
@@ -1114,12 +1062,12 @@ static int hebs_write_raw_row(
 		(unsigned long long)probes->gate_eval,
 		(unsigned long long)probes->state_change_commit,
 		(unsigned long long)probes->dff_exec,
-		plan->num_primary_inputs,
-		plan->gate_count,
-		plan->signal_count,
-		plan->propagation_depth,
-		plan->fanout_max,
-		plan->total_fanout_edges,
+		plan_metadata->num_primary_inputs,
+		plan_metadata->gate_count,
+		plan_metadata->signal_count,
+		plan_metadata->propagation_depth,
+		plan_metadata->fanout_max,
+		plan_metadata->total_fanout_edges,
 		(unsigned int)HEBS_COMPAT_PROBES_ENABLED);
 
 	return (ferror(csv_file) == 0);
@@ -1144,9 +1092,9 @@ static int hebs_write_trace_row(
 	uint64_t plan_fingerprint,
 	uint32_t logic_crc32,
 	const hebs_probes* probes,
-	const hebs_plan* plan)
+	const hebs_plan_metadata* plan_metadata)
 {
-	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan)
+	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan_metadata)
 	{
 		return 0;
 
@@ -1177,9 +1125,9 @@ static int hebs_write_trace_row(
 		(unsigned long long)probes->state_change_commit,
 		(unsigned long long)probes->dff_exec,
 		(unsigned int)HEBS_COMPAT_PROBES_ENABLED,
-		plan->num_primary_inputs,
-		plan->gate_count,
-		plan->signal_count);
+		plan_metadata->num_primary_inputs,
+		plan_metadata->gate_count,
+		plan_metadata->signal_count);
 
 	return (ferror(csv_file) == 0);
 
@@ -1222,8 +1170,11 @@ static int hebs_run_single_bench(
 	{
 		hebs_plan* plan = hebs_load_bench(target->bench_path);
 		hebs_engine engine = { 0 };
+		hebs_plan_metadata plan_metadata;
+		hebs_run_status run_status;
 		hebs_timer_t timer;
 		hebs_probes probes;
+		uint64_t plan_hash;
 		uint32_t crc32;
 		double elapsed;
 		uint32_t cycle;
@@ -1236,11 +1187,21 @@ static int hebs_run_single_bench(
 
 		}
 
+		if (!hebs_get_plan_metadata(plan, &plan_metadata))
+		{
+			printf("Iteration %u: plan metadata query failed\n", iter + 1U);
+			hebs_free_plan(plan);
+			return 0;
+
+		}
+
+		plan_hash = hebs_get_plan_hash(plan);
+
 		timer_start(&timer);
 		for (cycle = 0U; cycle < opts->cycles; ++cycle)
 		{
 			uint32_t pi;
-			for (pi = 0U; pi < plan->num_primary_inputs && pi < HEBS_MAX_PRIMARY_INPUTS; ++pi)
+			for (pi = 0U; pi < plan_metadata.num_primary_inputs && pi < HEBS_MAX_PRIMARY_INPUTS; ++pi)
 			{
 				hebs_logic_t value = ((cycle + pi) & 1U) ? HEBS_S1 : HEBS_S0;
 				if (hebs_set_primary_input(&engine, plan, pi, value) != HEBS_OK)
@@ -1264,7 +1225,7 @@ static int hebs_run_single_bench(
 					timer_stop(&timer);
 					elapsed = timer_elapsed_sec(&timer);
 					probes = hebs_get_probes(&engine);
-					crc32 = hebs_crc32_signal_trays(&engine);
+					crc32 = hebs_get_final_crc32(&engine);
 					if (!hebs_write_trace_row(
 						trace_file,
 						run_id,
@@ -1280,10 +1241,10 @@ static int hebs_run_single_bench(
 						cycle_index,
 						opts->cycles,
 						elapsed,
-						plan->lep_hash,
+						plan_hash,
 						crc32,
 						&probes,
-						plan))
+						&plan_metadata))
 					{
 						printf("Iteration %u: trace CSV write failed\n", iter + 1U);
 						hebs_free_plan(plan);
@@ -1300,7 +1261,14 @@ static int hebs_run_single_bench(
 
 		elapsed = timer_elapsed_sec(&timer);
 		probes = hebs_get_probes(&engine);
-		crc32 = hebs_crc32_signal_trays(&engine);
+		crc32 = hebs_get_final_crc32(&engine);
+		if (!hebs_get_run_status(&engine, &run_status) || run_status.last_status != HEBS_OK)
+		{
+			printf("Iteration %u: run status query failed\n", iter + 1U);
+			hebs_free_plan(plan);
+			return 0;
+
+		}
 		printf("Iteration %u: %.9f sec\n", iter + 1U, elapsed);
 
 		if (opts->record_mode == HEBS_RECORD_MODE_AGGREGATE && aggregate_file &&
@@ -1318,10 +1286,10 @@ static int hebs_run_single_bench(
 				opts->iterations,
 				opts->cycles,
 				elapsed,
-				plan->lep_hash,
+				plan_hash,
 				crc32,
 				&probes,
-				plan))
+				&plan_metadata))
 		{
 			printf("Iteration %u: raw CSV write failed\n", iter + 1U);
 			hebs_free_plan(plan);

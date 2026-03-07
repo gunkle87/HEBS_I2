@@ -70,6 +70,35 @@ static void hebs_swap_active_trays(hebs_engine* ctx)
 
 }
 
+static uint32_t hebs_crc32_bytes(const uint8_t* data, size_t len)
+{
+	uint32_t crc;
+	size_t idx;
+	int bit;
+
+	if (!data)
+	{
+		return 0U;
+
+	}
+
+	crc = 0xFFFFFFFFU;
+	for (idx = 0U; idx < len; ++idx)
+	{
+		crc ^= (uint32_t)data[idx];
+		for (bit = 0; bit < 8; ++bit)
+		{
+			uint32_t mask = (uint32_t)(-(int)(crc & 1U));
+			crc = (crc >> 1U) ^ (0xEDB88320U & mask);
+
+		}
+
+	}
+
+	return ~crc;
+
+}
+
 #define HEBS_LANE_LUT_INDEX(a, b) ((((uint32_t)(a) & 0x3U) << 2U) | ((uint32_t)(b) & 0x3U))
 
 /* 2-bit lane LUTs preserve current packed-lane gate behavior while reducing hot-loop decode math. */
@@ -758,18 +787,25 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 {
 	if (!ctx || !plan)
 	{
+		if (ctx)
+		{
+			ctx->last_status = HEBS_ERR_LOGIC;
+
+		}
 		return HEBS_ERR_LOGIC;
 
 	}
 
 	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS)
 	{
+		ctx->last_status = HEBS_ERR_LOGIC;
 		return HEBS_ERR_LOGIC;
 
 	}
 
 	if (plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
 	{
+		ctx->last_status = HEBS_ERR_LOGIC;
 		return HEBS_ERR_LOGIC;
 
 	}
@@ -789,6 +825,7 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
 	ctx->signal_trays = ctx->tray_plane_a;
 	ctx->next_signal_trays = ctx->tray_plane_b;
+	ctx->last_status = HEBS_OK;
 	return HEBS_OK;
 
 }
@@ -797,6 +834,11 @@ void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 {
 	if (!ctx || !plan)
 	{
+		if (ctx)
+		{
+			ctx->last_status = HEBS_ERR_LOGIC;
+
+		}
 		return;
 
 	}
@@ -817,6 +859,7 @@ void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 	++ctx->cycles_executed;
 	++ctx->vectors_applied;
 	ctx->current_tick++;
+	ctx->last_status = HEBS_OK;
 
 }
 
@@ -838,6 +881,24 @@ hebs_probes hebs_get_probes(const hebs_engine* ctx)
 	probes.state_change_commit = ctx->probe_state_change_commit;
 	probes.dff_exec = ctx->probe_dff_exec;
 	return probes;
+
+}
+
+int hebs_get_run_status(const hebs_engine* ctx, hebs_run_status* out_status)
+{
+	if (!ctx || !out_status)
+	{
+		return 0;
+
+	}
+
+	out_status->last_status = ctx->last_status;
+	out_status->current_tick = ctx->current_tick;
+	out_status->cycles_executed = ctx->cycles_executed;
+	out_status->vectors_applied = ctx->vectors_applied;
+	out_status->tray_count = ctx->tray_count;
+	out_status->compat_metrics_enabled = (uint8_t)HEBS_COMPAT_PROBES_ENABLED;
+	return 1;
 
 }
 
@@ -867,6 +928,56 @@ uint64_t hebs_get_state_hash(hebs_engine* ctx)
 
 }
 
+uint32_t hebs_get_final_crc32(const hebs_engine* ctx)
+{
+	if (!ctx || !ctx->signal_trays || ctx->tray_count == 0U)
+	{
+		return 0U;
+
+	}
+
+	return hebs_crc32_bytes((const uint8_t*)ctx->signal_trays, (size_t)ctx->tray_count * sizeof(uint64_t));
+
+}
+
+uint64_t hebs_get_plan_hash(const hebs_plan* plan)
+{
+	if (!plan)
+	{
+		return 0U;
+
+	}
+
+	return plan->lep_hash;
+
+}
+
+int hebs_get_plan_metadata(const hebs_plan* plan, hebs_plan_metadata* out_metadata)
+{
+	if (!plan || !out_metadata)
+	{
+		return 0;
+
+	}
+
+	memset(out_metadata, 0, sizeof(*out_metadata));
+	out_metadata->plan_hash = plan->lep_hash;
+	out_metadata->level_count = plan->level_count;
+	out_metadata->num_primary_inputs = plan->num_primary_inputs;
+	out_metadata->num_primary_outputs = plan->num_primary_outputs;
+	out_metadata->signal_count = plan->signal_count;
+	out_metadata->gate_count = plan->gate_count;
+	out_metadata->tray_count = plan->tray_count;
+	out_metadata->propagation_depth = plan->propagation_depth;
+	out_metadata->fanout_max = plan->fanout_max;
+	out_metadata->total_fanout_edges = plan->total_fanout_edges;
+	out_metadata->fanout_avg = plan->fanout_avg;
+	out_metadata->dff_exec_count = plan->dff_exec_count;
+	out_metadata->comb_instruction_count = plan->comb_instruction_count;
+	return 1;
+
+}
+
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value)
 {
 	uint32_t signal_id;
@@ -877,12 +988,18 @@ hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, ui
 
 	if (!ctx || !plan || input_index >= plan->num_primary_inputs)
 	{
+		if (ctx)
+		{
+			ctx->last_status = HEBS_ERR_LOGIC;
+
+		}
 		return HEBS_ERR_LOGIC;
 
 	}
 
 	if (value > HEBS_WX)
 	{
+		ctx->last_status = HEBS_ERR_LOGIC;
 		return HEBS_ERR_LOGIC;
 
 	}
@@ -897,8 +1014,9 @@ hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, ui
 		++ctx->probe_input_toggle;
 
 	}
-#endif
+	#endif
 	hebs_write_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset, value);
+	ctx->last_status = HEBS_OK;
 	return HEBS_OK;
 
 }

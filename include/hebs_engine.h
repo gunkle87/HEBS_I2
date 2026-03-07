@@ -133,6 +133,35 @@ typedef struct hebs_probes_s
 
 } hebs_probes;
 
+typedef struct hebs_plan_metadata_s
+{
+	uint64_t plan_hash;
+	uint32_t level_count;
+	uint32_t num_primary_inputs;
+	uint32_t num_primary_outputs;
+	uint32_t signal_count;
+	uint32_t gate_count;
+	uint32_t tray_count;
+	uint32_t propagation_depth;
+	uint32_t fanout_max;
+	uint32_t total_fanout_edges;
+	double fanout_avg;
+	uint32_t dff_exec_count;
+	uint32_t comb_instruction_count;
+
+} hebs_plan_metadata;
+
+typedef struct hebs_run_status_s
+{
+	hebs_status_t last_status;
+	uint64_t current_tick;
+	uint64_t cycles_executed;
+	uint64_t vectors_applied;
+	uint32_t tray_count;
+	uint8_t compat_metrics_enabled;
+
+} hebs_run_status;
+
 typedef struct hebs_engine_s
 {
 	uint64_t current_tick;
@@ -144,6 +173,7 @@ typedef struct hebs_engine_s
 	uint64_t* next_signal_trays;
 	uint64_t cycles_executed;
 	uint64_t vectors_applied;
+	hebs_status_t last_status;
 	uint64_t probe_input_apply;
 	uint64_t probe_input_toggle;
 	uint64_t probe_chunk_exec;
@@ -159,7 +189,11 @@ void hebs_free_plan(hebs_plan* plan);
 hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan);
 void hebs_tick(hebs_engine* ctx, hebs_plan* plan);
 hebs_probes hebs_get_probes(const hebs_engine* ctx);
+int hebs_get_run_status(const hebs_engine* ctx, hebs_run_status* out_status);
 uint64_t hebs_get_state_hash(hebs_engine* ctx);
+uint32_t hebs_get_final_crc32(const hebs_engine* ctx);
+uint64_t hebs_get_plan_hash(const hebs_plan* plan);
+int hebs_get_plan_metadata(const hebs_plan* plan, hebs_plan_metadata* out_metadata);
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value);
 hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);
 const uint64_t* hebs_get_signal_tray(const hebs_engine* ctx, uint32_t tray_index);

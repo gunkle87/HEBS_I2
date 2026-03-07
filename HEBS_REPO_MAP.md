@@ -122,37 +122,57 @@ Location: core/loader.c:1421
 hebs_init_engine
 Kind: function
 Use: initialize engine state from a plan and reset probes
-Location: core/engine.c:716
+Location: core/engine.c:786
 
 hebs_tick
 Kind: function
 Use: execute one simulation tick with combinational and sequential phases
-Location: core/engine.c:757
+Location: core/engine.c:833
 
 hebs_get_probes
 Kind: function
 Use: return a raw probe snapshot from engine state
-Location: core/engine.c:784
+Location: core/engine.c:866
+
+hebs_get_run_status
+Kind: function
+Use: return current engine run status facts without deriving metrics
+Location: core/engine.c:887
 
 hebs_get_state_hash
 Kind: function
 Use: compute hash of current engine trays and tick
-Location: core/engine.c:807
+Location: core/engine.c:908
+
+hebs_get_final_crc32
+Kind: function
+Use: return crc32 fingerprint over current active signal trays
+Location: core/engine.c:931
+
+hebs_get_plan_hash
+Kind: function
+Use: return immutable plan hash from a loaded plan
+Location: core/engine.c:943
+
+hebs_get_plan_metadata
+Kind: function
+Use: copy static plan metadata facts into a snapshot struct
+Location: core/engine.c:955
 
 hebs_set_primary_input
 Kind: function
 Use: apply primary input value to engine tray storage
-Location: core/engine.c:833
+Location: core/engine.c:981
 
 hebs_get_primary_input
 Kind: function
 Use: read primary input value from engine state
-Location: core/engine.c:869
+Location: core/engine.c:1024
 
 hebs_get_signal_tray
 Kind: function
 Use: expose tray pointer for read access by tray index
-Location: core/engine.c:886
+Location: core/engine.c:1041
 
 hebs_resolve_states
 Kind: function
@@ -384,17 +404,37 @@ Location: include/hebs_engine.h:125
 hebs_probes
 Kind: typedef
 Use: alias for raw probe snapshot type
+Location: include/hebs_engine.h:134
+
+hebs_plan_metadata_s
+Kind: struct
+Use: immutable plan identity and topology fact snapshot layout
 Location: include/hebs_engine.h:136
+
+hebs_plan_metadata
+Kind: typedef
+Use: alias for plan metadata fact snapshot type
+Location: include/hebs_engine.h:152
+
+hebs_run_status_s
+Kind: struct
+Use: engine run status fact snapshot layout
+Location: include/hebs_engine.h:154
+
+hebs_run_status
+Kind: typedef
+Use: alias for engine run status fact snapshot type
+Location: include/hebs_engine.h:163
 
 hebs_engine_s
 Kind: struct
 Use: main engine context and tray storage container
-Location: include/hebs_engine.h:138
+Location: include/hebs_engine.h:165
 
 hebs_engine
 Kind: typedef
 Use: alias for engine context type
-Location: include/hebs_engine.h:158
+Location: include/hebs_engine.h:184
 
 hebs_signal_table_s
 Kind: struct
@@ -1059,91 +1099,97 @@ hebs_engine_s.current_tick
 Kind: field
 Use: current tick index
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:138
+Location: include/hebs_engine.h:167
 
 hebs_engine_s.tray_count
 Kind: field
 Use: active tray count for current plan
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:139
+Location: include/hebs_engine.h:168
 
 hebs_engine_s.tray_plane_a
 Kind: field
 Use: first tray plane storage buffer
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:140
+Location: include/hebs_engine.h:169
 
 hebs_engine_s.tray_plane_b
 Kind: field
 Use: second tray plane storage buffer
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:141
+Location: include/hebs_engine.h:170
 
 hebs_engine_s.dff_state_trays
 Kind: field
 Use: dedicated DFF state tray storage
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:142
+Location: include/hebs_engine.h:171
 
 hebs_engine_s.signal_trays
 Kind: field
 Use: pointer to active signal tray buffer
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:143
+Location: include/hebs_engine.h:172
 
 hebs_engine_s.next_signal_trays
 Kind: field
 Use: pointer to next signal tray buffer
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:144
+Location: include/hebs_engine.h:173
 
 hebs_engine_s.cycles_executed
 Kind: field
 Use: total executed cycle counter
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:145
+Location: include/hebs_engine.h:174
 
 hebs_engine_s.vectors_applied
 Kind: field
 Use: total applied vector counter
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:146
+Location: include/hebs_engine.h:175
+
+hebs_engine_s.last_status
+Kind: field
+Use: last API status observed on engine context
+Parent: hebs_engine_s
+Location: include/hebs_engine.h:176
 
 hebs_engine_s.probe_input_apply
 Kind: field
 Use: internal probe counter for input apply operations
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:147
+Location: include/hebs_engine.h:177
 
 hebs_engine_s.probe_input_toggle
 Kind: field
 Use: internal probe counter for input toggles
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:148
+Location: include/hebs_engine.h:178
 
 hebs_engine_s.probe_chunk_exec
 Kind: field
 Use: internal probe counter for chunk executions
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:149
+Location: include/hebs_engine.h:179
 
 hebs_engine_s.probe_gate_eval
 Kind: field
 Use: internal probe counter for gate evaluations
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:150
+Location: include/hebs_engine.h:180
 
 hebs_engine_s.probe_state_change_commit
 Kind: field
 Use: internal probe counter for state change commits
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:151
+Location: include/hebs_engine.h:181
 
 hebs_engine_s.probe_dff_exec
 Kind: field
 Use: internal probe counter for DFF executions
 Parent: hebs_engine_s
-Location: include/hebs_engine.h:152
+Location: include/hebs_engine.h:182
 
 9 Referenced Inputs and Support Files
 
