@@ -72,8 +72,12 @@ Purpose: sequential commit interface declaration
 Location: include/state_manager.h
 
 runner.c
-Purpose: benchmark suite execution and metric derivation outside engine
+Purpose: benchmark suite execution and raw recording control (aggregate, trace, none) outside engine
 Location: benchmarks/runner.c
+
+metric_calculator.c
+Purpose: derived metric calculator that consumes runner raw CSV and emits derived benchmark CSV
+Location: benchmarks/metric_calculator.c
 
 csv_export.h
 Purpose: csv ledger write helpers for benchmark runs

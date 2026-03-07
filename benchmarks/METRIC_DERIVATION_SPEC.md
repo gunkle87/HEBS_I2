@@ -11,6 +11,8 @@ Default input path:
 - `benchmarks/results/raw_runner_output.csv`
 
 Raw schema contract is defined in `benchmarks/BENCH_RUNNER_SPEC.md`.
+Calculator consumes aggregate-mode raw CSV only.
+Trace-mode CSV (`trace_cycle.csv`) is out of scope for this calculator.
 
 ## 3. Output
 Calculator output is derived CSV.

@@ -22,6 +22,9 @@
 #ifndef RAW_CSV_PATH
 #define RAW_CSV_PATH "benchmarks/results/raw_runner_output.csv"
 #endif
+#ifndef TRACE_CSV_PATH
+#define TRACE_CSV_PATH "benchmarks/results/trace_cycle.csv"
+#endif
 #ifndef REVISION_NAME
 #define REVISION_NAME "Raw_Runner_v01"
 #endif
@@ -34,6 +37,21 @@ typedef enum hebs_scope_e
 
 } hebs_scope_t;
 
+typedef enum hebs_record_mode_e
+{
+	HEBS_RECORD_MODE_AGGREGATE = 0,
+	HEBS_RECORD_MODE_TRACE = 1,
+	HEBS_RECORD_MODE_NONE = 2
+
+} hebs_record_mode_t;
+
+typedef enum hebs_record_overwrite_e
+{
+	HEBS_RECORD_OVERWRITE_APPEND = 0,
+	HEBS_RECORD_OVERWRITE_OVERWRITE = 1
+
+} hebs_record_overwrite_t;
+
 typedef struct hebs_cli_options_s
 {
 	hebs_scope_t scope;
@@ -41,9 +59,14 @@ typedef struct hebs_cli_options_s
 	char bench_filter[128];
 	char bench_root[260];
 	char output_csv[260];
+	char trace_csv[260];
 	uint32_t iterations;
 	uint32_t cycles;
 	double warmup_seconds;
+	hebs_record_mode_t record_mode;
+	hebs_record_overwrite_t record_overwrite_rule;
+	uint8_t record_meta_head;
+	uint32_t record_interval;
 
 } hebs_cli_options_t;
 
@@ -62,6 +85,42 @@ static const char* hebs_probe_profile_name(void)
 #else
 	return "perf";
 #endif
+
+}
+
+static const char* hebs_scope_name(hebs_scope_t scope)
+{
+	if (scope == HEBS_SCOPE_ALL)
+	{
+		return "all";
+
+	}
+
+	if (scope == HEBS_SCOPE_SUITE)
+	{
+		return "suite";
+
+	}
+
+	return "bench";
+
+}
+
+static const char* hebs_record_mode_name(hebs_record_mode_t mode)
+{
+	if (mode == HEBS_RECORD_MODE_AGGREGATE)
+	{
+		return "aggregate";
+
+	}
+
+	if (mode == HEBS_RECORD_MODE_TRACE)
+	{
+		return "trace";
+
+	}
+
+	return "none";
 
 }
 
@@ -244,10 +303,14 @@ static void hebs_print_usage(const char* exe)
 {
 	printf("Usage:\n");
 	printf("  %s [--scope all|suite|bench] [--suite NAME] [--bench FILE] [--iterations N] [--cycles N] [--warmup-seconds X] [--bench-root PATH] [--output PATH]\n", exe ? exe : "hebs_cli");
+	printf("     [--record-mode aggregate|trace|none] [--record-overwrite append|overwrite] [--record-meta-head on|off]\n");
+	printf("     [--record-interval N] [--trace-output PATH]\n");
 	printf("Examples:\n");
 	printf("  hebs_cli --scope all\n");
 	printf("  hebs_cli --scope suite --suite <suite_name>\n");
 	printf("  hebs_cli --scope bench --suite <suite_name> --bench <bench_file.bench>\n");
+	printf("  hebs_cli --record-mode trace --record-interval 1000 --trace-output benchmarks/results/trace_cycle.csv\n");
+	printf("  hebs_cli --record-mode none\n");
 
 }
 
@@ -330,6 +393,91 @@ static int hebs_parse_scope(const char* text, hebs_scope_t* out_scope)
 
 }
 
+static int hebs_parse_record_mode(const char* text, hebs_record_mode_t* out_mode)
+{
+	if (!text || !out_mode)
+	{
+		return 0;
+
+	}
+
+	if (_stricmp(text, "aggregate") == 0)
+	{
+		*out_mode = HEBS_RECORD_MODE_AGGREGATE;
+		return 1;
+
+	}
+
+	if (_stricmp(text, "trace") == 0)
+	{
+		*out_mode = HEBS_RECORD_MODE_TRACE;
+		return 1;
+
+	}
+
+	if (_stricmp(text, "none") == 0)
+	{
+		*out_mode = HEBS_RECORD_MODE_NONE;
+		return 1;
+
+	}
+
+	return 0;
+
+}
+
+static int hebs_parse_record_overwrite(const char* text, hebs_record_overwrite_t* out_rule)
+{
+	if (!text || !out_rule)
+	{
+		return 0;
+
+	}
+
+	if (_stricmp(text, "append") == 0)
+	{
+		*out_rule = HEBS_RECORD_OVERWRITE_APPEND;
+		return 1;
+
+	}
+
+	if (_stricmp(text, "overwrite") == 0)
+	{
+		*out_rule = HEBS_RECORD_OVERWRITE_OVERWRITE;
+		return 1;
+
+	}
+
+	return 0;
+
+}
+
+static int hebs_parse_on_off(const char* text, uint8_t* out_value)
+{
+	if (!text || !out_value)
+	{
+		return 0;
+
+	}
+
+	if (_stricmp(text, "on") == 0 || _stricmp(text, "true") == 0 || strcmp(text, "1") == 0)
+	{
+		*out_value = 1U;
+		return 1;
+
+	}
+
+	if (_stricmp(text, "off") == 0 || _stricmp(text, "false") == 0 || strcmp(text, "0") == 0)
+	{
+		*out_value = 0U;
+		return 1;
+
+	}
+
+	return 0;
+
+}
+
 static int hebs_parse_cli(int argc, char** argv, hebs_cli_options_t* opts)
 {
 	int idx;
@@ -345,8 +493,13 @@ static int hebs_parse_cli(int argc, char** argv, hebs_cli_options_t* opts)
 	opts->iterations = DEFAULT_ITERATIONS;
 	opts->cycles = DEFAULT_SIM_CYCLES;
 	opts->warmup_seconds = DEFAULT_WARMUP_SECONDS;
+	opts->record_mode = HEBS_RECORD_MODE_AGGREGATE;
+	opts->record_overwrite_rule = HEBS_RECORD_OVERWRITE_APPEND;
+	opts->record_meta_head = 0U;
+	opts->record_interval = 1U;
 	snprintf(opts->bench_root, sizeof(opts->bench_root), "%s", DEFAULT_BENCH_ROOT);
 	snprintf(opts->output_csv, sizeof(opts->output_csv), "%s", RAW_CSV_PATH);
+	snprintf(opts->trace_csv, sizeof(opts->trace_csv), "%s", TRACE_CSV_PATH);
 
 	for (idx = 1; idx < argc; ++idx)
 	{
@@ -451,6 +604,67 @@ static int hebs_parse_cli(int argc, char** argv, hebs_cli_options_t* opts)
 
 		}
 
+		if (strcmp(arg, "--trace-output") == 0)
+		{
+			if (idx + 1 >= argc)
+			{
+				return 0;
+
+			}
+			snprintf(opts->trace_csv, sizeof(opts->trace_csv), "%s", argv[idx + 1]);
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--record-mode") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_record_mode(argv[idx + 1], &opts->record_mode))
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--record-overwrite") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_record_overwrite(argv[idx + 1], &opts->record_overwrite_rule))
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--record-meta-head") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_on_off(argv[idx + 1], &opts->record_meta_head))
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--record-interval") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_u32(argv[idx + 1], &opts->record_interval) || opts->record_interval == 0U)
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
 		return 0;
 
 	}
@@ -462,6 +676,12 @@ static int hebs_parse_cli(int argc, char** argv, hebs_cli_options_t* opts)
 	}
 
 	if (opts->scope == HEBS_SCOPE_BENCH && (opts->suite_filter[0] == '\0' || opts->bench_filter[0] == '\0'))
+	{
+		return 0;
+
+	}
+
+	if (opts->record_mode == HEBS_RECORD_MODE_TRACE && opts->record_interval == 0U)
 	{
 		return 0;
 
@@ -757,6 +977,65 @@ static int hebs_csv_file_is_empty(const char* output_path)
 
 }
 
+static int hebs_open_record_file(const char* path, hebs_record_overwrite_t overwrite_rule, FILE** out_file, int* out_file_was_empty)
+{
+	if (!path || !out_file || !out_file_was_empty)
+	{
+		return 0;
+
+	}
+
+	if (overwrite_rule == HEBS_RECORD_OVERWRITE_OVERWRITE)
+	{
+		*out_file = fopen(path, "w");
+		*out_file_was_empty = 1;
+		return (*out_file != NULL);
+
+	}
+
+	*out_file_was_empty = hebs_csv_file_is_empty(path);
+	*out_file = fopen(path, "a");
+	return (*out_file != NULL);
+
+}
+
+static int hebs_write_record_meta_head(
+	FILE* out_file,
+	const char* artifact_name,
+	const char* run_id,
+	const char* revision,
+	const char* date_text,
+	const char* time_text,
+	const char* git_hash,
+	const hebs_cli_options_t* opts)
+{
+	if (!out_file || !artifact_name || !run_id || !revision || !date_text || !time_text || !git_hash || !opts)
+	{
+		return 0;
+
+	}
+
+	fprintf(
+		out_file,
+		"# meta artifact=%s run_id=%s revision=%s date=%s time=%s git_commit=%s probe_profile=%s scope=%s iterations=%u cycles=%u record_mode=%s record_interval=%u warmup_seconds=%.3f\n",
+		artifact_name,
+		run_id,
+		revision,
+		date_text,
+		time_text,
+		git_hash,
+		hebs_probe_profile_name(),
+		hebs_scope_name(opts->scope),
+		opts->iterations,
+		opts->cycles,
+		hebs_record_mode_name(opts->record_mode),
+		opts->record_interval,
+		opts->warmup_seconds);
+
+	return (ferror(out_file) == 0);
+
+}
+
 static int hebs_write_raw_header(FILE* csv_file)
 {
 	if (!csv_file)
@@ -768,6 +1047,21 @@ static int hebs_write_raw_header(FILE* csv_file)
 	fprintf(
 		csv_file,
 		"run_id,revision,date,time,git_commit,suite,bench,mode,iteration,iterations_total,cycles,runtime_sec,plan_fingerprint,logic_crc32,probe_input_apply,probe_input_toggle,probe_chunk_exec,probe_gate_eval,probe_state_change_commit,probe_dff_exec,pi_count,gate_count,signal_count,propagation_depth,fanout_max,total_fanout_edges,compat_metrics_enabled\n");
+	return (ferror(csv_file) == 0);
+
+}
+
+static int hebs_write_trace_header(FILE* csv_file)
+{
+	if (!csv_file)
+	{
+		return 0;
+
+	}
+
+	fprintf(
+		csv_file,
+		"run_id,revision,date,time,git_commit,suite,bench,mode,iteration,iterations_total,cycle,cycles_total,runtime_sec,plan_fingerprint,logic_crc32,probe_input_apply,probe_input_toggle,probe_chunk_exec,probe_gate_eval,probe_state_change_commit,probe_dff_exec,compat_metrics_enabled,pi_count,gate_count,signal_count\n");
 	return (ferror(csv_file) == 0);
 
 }
@@ -832,6 +1126,65 @@ static int hebs_write_raw_row(
 
 }
 
+static int hebs_write_trace_row(
+	FILE* csv_file,
+	const char* run_id,
+	const char* revision,
+	const char* date_text,
+	const char* time_text,
+	const char* git_hash,
+	const char* suite,
+	const char* bench,
+	const char* mode,
+	uint32_t iteration_index,
+	uint32_t iterations_total,
+	uint32_t cycle_index,
+	uint32_t cycles_total,
+	double runtime_sec,
+	uint64_t plan_fingerprint,
+	uint32_t logic_crc32,
+	const hebs_probes* probes,
+	const hebs_plan* plan)
+{
+	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan)
+	{
+		return 0;
+
+	}
+
+	fprintf(
+		csv_file,
+		"%s,%s,%s,%s,%s,%s,%s,%s,%u,%u,%u,%u,%.9f,0x%llX,0x%08X,%llu,%llu,%llu,%llu,%llu,%llu,%u,%u,%u,%u\n",
+		run_id,
+		revision,
+		date_text,
+		time_text,
+		git_hash,
+		suite,
+		bench,
+		mode,
+		iteration_index,
+		iterations_total,
+		cycle_index,
+		cycles_total,
+		runtime_sec,
+		(unsigned long long)plan_fingerprint,
+		(unsigned int)logic_crc32,
+		(unsigned long long)probes->input_apply,
+		(unsigned long long)probes->input_toggle,
+		(unsigned long long)probes->chunk_exec,
+		(unsigned long long)probes->gate_eval,
+		(unsigned long long)probes->state_change_commit,
+		(unsigned long long)probes->dff_exec,
+		(unsigned int)HEBS_COMPAT_PROBES_ENABLED,
+		plan->num_primary_inputs,
+		plan->gate_count,
+		plan->signal_count);
+
+	return (ferror(csv_file) == 0);
+
+}
+
 static int hebs_run_single_bench(
 	const hebs_cli_options_t* opts,
 	const hebs_bench_target_t* target,
@@ -840,11 +1193,24 @@ static int hebs_run_single_bench(
 	const char* date_text,
 	const char* time_text,
 	const char* git_hash,
-	FILE* csv_file)
+	FILE* aggregate_file,
+	FILE* trace_file)
 {
 	uint32_t iter;
 
-	if (!opts || !target || !run_id || !revision || !date_text || !time_text || !git_hash || !csv_file)
+	if (!opts || !target || !run_id || !revision || !date_text || !time_text || !git_hash)
+	{
+		return 0;
+
+	}
+
+	if (opts->record_mode == HEBS_RECORD_MODE_AGGREGATE && !aggregate_file)
+	{
+		return 0;
+
+	}
+
+	if (opts->record_mode == HEBS_RECORD_MODE_TRACE && !trace_file)
 	{
 		return 0;
 
@@ -889,6 +1255,46 @@ static int hebs_run_single_bench(
 
 			hebs_tick(&engine, plan);
 
+			if (opts->record_mode == HEBS_RECORD_MODE_TRACE && trace_file)
+			{
+				const uint32_t cycle_index = cycle + 1U;
+				const int record_due = ((cycle_index % opts->record_interval) == 0U) || (cycle_index == opts->cycles);
+				if (record_due)
+				{
+					timer_stop(&timer);
+					elapsed = timer_elapsed_sec(&timer);
+					probes = hebs_get_probes(&engine);
+					crc32 = hebs_crc32_signal_trays(&engine);
+					if (!hebs_write_trace_row(
+						trace_file,
+						run_id,
+						revision,
+						date_text,
+						time_text,
+						git_hash,
+						target->suite_name,
+						target->bench_file,
+						hebs_probe_profile_name(),
+						iter + 1U,
+						opts->iterations,
+						cycle_index,
+						opts->cycles,
+						elapsed,
+						plan->lep_hash,
+						crc32,
+						&probes,
+						plan))
+					{
+						printf("Iteration %u: trace CSV write failed\n", iter + 1U);
+						hebs_free_plan(plan);
+						return 0;
+
+					}
+
+				}
+
+			}
+
 		}
 		timer_stop(&timer);
 
@@ -897,24 +1303,25 @@ static int hebs_run_single_bench(
 		crc32 = hebs_crc32_signal_trays(&engine);
 		printf("Iteration %u: %.9f sec\n", iter + 1U, elapsed);
 
-		if (!hebs_write_raw_row(
-			csv_file,
-			run_id,
-			revision,
-			date_text,
-			time_text,
-			git_hash,
-			target->suite_name,
-			target->bench_file,
-			hebs_probe_profile_name(),
-			iter + 1U,
-			opts->iterations,
-			opts->cycles,
-			elapsed,
-			plan->lep_hash,
-			crc32,
-			&probes,
-			plan))
+		if (opts->record_mode == HEBS_RECORD_MODE_AGGREGATE && aggregate_file &&
+			!hebs_write_raw_row(
+				aggregate_file,
+				run_id,
+				revision,
+				date_text,
+				time_text,
+				git_hash,
+				target->suite_name,
+				target->bench_file,
+				hebs_probe_profile_name(),
+				iter + 1U,
+				opts->iterations,
+				opts->cycles,
+				elapsed,
+				plan->lep_hash,
+				crc32,
+				&probes,
+				plan))
 		{
 			printf("Iteration %u: raw CSV write failed\n", iter + 1U);
 			hebs_free_plan(plan);
@@ -939,11 +1346,13 @@ int main(int argc, char** argv)
 	char date_text[32];
 	char git_hash[64];
 	char run_id[256];
-	FILE* csv_file;
+	FILE* aggregate_file;
+	FILE* trace_file;
 	int processed;
 	int failures;
 	uint32_t target_idx;
-	int file_was_empty;
+	int aggregate_file_was_empty;
+	int trace_file_was_empty;
 
 	if (!hebs_parse_cli(argc, argv, &options))
 	{
@@ -975,22 +1384,65 @@ int main(int argc, char** argv)
 
 	hebs_warmup(options.warmup_seconds);
 
-	file_was_empty = hebs_csv_file_is_empty(options.output_csv);
-	csv_file = fopen(options.output_csv, "a");
-	if (!csv_file)
-	{
-		printf("Failed to open raw CSV output: %s\n", options.output_csv);
-		free(targets);
-		return 1;
+	aggregate_file = NULL;
+	trace_file = NULL;
+	aggregate_file_was_empty = 1;
+	trace_file_was_empty = 1;
 
-	}
-
-	if (file_was_empty)
+	if (options.record_mode == HEBS_RECORD_MODE_AGGREGATE)
 	{
-		if (!hebs_write_raw_header(csv_file))
+		if (!hebs_open_record_file(options.output_csv, options.record_overwrite_rule, &aggregate_file, &aggregate_file_was_empty))
+		{
+			printf("Failed to open raw CSV output: %s\n", options.output_csv);
+			free(targets);
+			return 1;
+
+		}
+
+		if (aggregate_file_was_empty && !hebs_write_raw_header(aggregate_file))
 		{
 			printf("Failed to write raw CSV header: %s\n", options.output_csv);
-			fclose(csv_file);
+			fclose(aggregate_file);
+			free(targets);
+			return 1;
+
+		}
+
+		if (options.record_meta_head &&
+			!hebs_write_record_meta_head(aggregate_file, "aggregate_raw", run_id, REVISION_NAME, date_text, timestamp, git_hash, &options))
+		{
+			printf("Failed to write raw CSV metadata head: %s\n", options.output_csv);
+			fclose(aggregate_file);
+			free(targets);
+			return 1;
+
+		}
+
+	}
+	else if (options.record_mode == HEBS_RECORD_MODE_TRACE)
+	{
+		if (!hebs_open_record_file(options.trace_csv, options.record_overwrite_rule, &trace_file, &trace_file_was_empty))
+		{
+			printf("Failed to open trace CSV output: %s\n", options.trace_csv);
+			free(targets);
+			return 1;
+
+		}
+
+		if (trace_file_was_empty && !hebs_write_trace_header(trace_file))
+		{
+			printf("Failed to write trace CSV header: %s\n", options.trace_csv);
+			fclose(trace_file);
+			free(targets);
+			return 1;
+
+		}
+
+		if (options.record_meta_head &&
+			!hebs_write_record_meta_head(trace_file, "trace_cycle", run_id, REVISION_NAME, date_text, timestamp, git_hash, &options))
+		{
+			printf("Failed to write trace CSV metadata head: %s\n", options.trace_csv);
+			fclose(trace_file);
 			free(targets);
 			return 1;
 
@@ -1003,7 +1455,7 @@ int main(int argc, char** argv)
 	for (target_idx = 0U; target_idx < target_count; ++target_idx)
 	{
 		const hebs_bench_target_t* target = &targets[target_idx];
-		if (!hebs_run_single_bench(&options, target, run_id, REVISION_NAME, date_text, timestamp, git_hash, csv_file))
+		if (!hebs_run_single_bench(&options, target, run_id, REVISION_NAME, date_text, timestamp, git_hash, aggregate_file, trace_file))
 		{
 			++failures;
 			continue;
@@ -1014,11 +1466,38 @@ int main(int argc, char** argv)
 
 	}
 
-	fclose(csv_file);
+	if (aggregate_file)
+	{
+		fclose(aggregate_file);
+
+	}
+
+	if (trace_file)
+	{
+		fclose(trace_file);
+
+	}
+
 	free(targets);
 
-	printf("\nRAW RUN SUMMARY: processed=%d failed=%d\n", processed, failures);
-	printf("Raw CSV: %s\n", options.output_csv);
+	printf("\nRUN SUMMARY: processed=%d failed=%d\n", processed, failures);
+	printf("Record mode: %s\n", hebs_record_mode_name(options.record_mode));
+	if (options.record_mode == HEBS_RECORD_MODE_AGGREGATE)
+	{
+		printf("Raw CSV: %s\n", options.output_csv);
+
+	}
+	else if (options.record_mode == HEBS_RECORD_MODE_TRACE)
+	{
+		printf("Trace CSV: %s\n", options.trace_csv);
+
+	}
+	else
+	{
+		printf("Artifacts: disabled\n");
+
+	}
+
 	return (failures == 0) ? 0 : 1;
 
 }

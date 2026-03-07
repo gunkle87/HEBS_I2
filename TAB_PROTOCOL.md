@@ -75,9 +75,3 @@ All fixes require explicit approval.
 ## 10. Test Creation Rule
 When new engine functionality is introduced:
 At least one test must be created to verify that functionality.
-
-The following will need to be reviewed for code correction. It is placed here to avoid agent confusion:
-Missing: implementation-status addendum for runner behavior.
-Why: protocol says directory scanning/no hardcoding/runtime parameterization, but current runner is static table + compile-time params.
-Protocol claims: lines 39-40, 47-48.
-Implementation: benchmarks/runner.c lines 50, 70, 16, 19, 715.

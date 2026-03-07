@@ -254,3 +254,29 @@ SRAM KEY TAKEAWAYS:
     The old repo used a very lean bitwise check for edge-triggering: rise = clk & ~clk_prev.
 
 Application: In our SIMD Batch Executor, we can apply this across 64 clocks at once. By storing clk_prev as a 64-bit tray, we can detect rising edges for an entire batch of DFFs in a single AND/NOT operation.
+
+
+Bench Runner findings:
+
+Before describing the recording model, it is important to clarify the semantic distinction between **cycles** and **iterations** as used in this implementation.
+
+Although the words are often used interchangeably in plain language, they represent two different execution concepts within the runner. A **cycle** refers to the repeated execution of a single benchmark within a single cold-start session. In other words, the same bench is executed multiple times consecutively under the same initialized engine state. An **iteration**, by contrast, represents a full repetition of that cold-start process itself. Each iteration begins with a fresh engine initialization and then runs the configured number of cycles for the selected bench. In summary, **cycles occur inside a single cold start**, while **iterations represent repeated cold starts of the same benchmark workload**.
+
+---
+
+During review of the current runner behavior, I noticed a structural issue with the recording model. The runner currently appends results for every **iteration** directly to the CSV output (not every cycle). While the execution behavior itself is correct, this recording strategy can still become unwieldy as run sizes increase and aggregation needs expand. The intent of the benchmark runner is to execute cycles and gather useful information about the run, not to act as a full trace dump by default.
+
+The correct separation should be between **execution granularity** and **recording granularity**. The engine may execute a very large number of **cycles**, but the runner should normally record only the level requested by policy (iteration, bench, suite, or run). Per-cycle recording should be treated as a specialized trace/debug mode rather than the default benchmark behavior.
+
+To support this, the runner should implement configurable recording controls. The output destination should remain configurable through `record_file_path` and `record_file_name`, along with a `record_overwrite_rule` that determines whether the output file is appended to or overwritten. The runner should also support a metadata header option (`record_meta_head`) so that contextual information about the run can be included at the beginning of a dataset.
+
+The runner should introduce a **recording mode** that determines how results are written. The normal mode should be **aggregate recording**, where the runner executes all cycles within an iteration but emits only summarized results. A separate **trace recording mode** may optionally allow per-cycle or interval-based output for debugging or analysis purposes. A third option (`none`) may disable artifact writing entirely when a user only wants to run the engine without producing files.
+
+Aggregation itself should be configurable. The runner should support aggregation types such as `mean`, `median`, `min`, `max`, or `all`, and aggregation scope should be selectable across execution boundaries such as `cycle`, `iteration`, `bench`, `suite`, or `run`. This allows the same runner to produce different levels of summarized results without changing the engine or the runner core logic.
+
+For trace-style recording, a `record_interval` parameter should also be introduced so that data is recorded every **N cycles** (only when trace mode is explicitly enabled), preventing runaway artifact sizes when trace output is requested.
+
+The key design principle is that the runner should execute the full workload while **recording only the information necessary for the requested aggregation level**. Per-cycle output should only occur when explicitly requested. This keeps benchmark artifacts compact, preserves the usefulness of the data, and avoids turning the benchmark runner into an unintended trace generator.
+
+This change preserves the current execution behavior of the runner while making artifact recording scalable, configurable, and aligned with the long-term architecture where the runner records raw facts and higher-level interpretation is handled elsewhere.
+
