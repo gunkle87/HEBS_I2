@@ -1,107 +1,117 @@
 # Benchmark Runner Technical Specification
 
 ## 1. Scope
-This document specifies the benchmark runner tooling in `benchmarks/`.
-It does not define engine architecture or engine correctness behavior.
-Engine behavior is consumed through public APIs only.
+This document defines the benchmark runner in `benchmarks/runner.c`.
+It defines run discovery, run execution, and raw CSV output only.
 
-Primary implementation source:
-- `benchmarks/runner.c`
-- `benchmarks/report_types.h`
-- `benchmarks/protocol_helper.h`
-- `benchmarks/csv_export.h`
-- `benchmarks/html_report.h`
-- `benchmarks/timing_helper.h`
+It does not define:
+- engine architecture
+- engine correctness policy
+- derived metric policy
+- report rendering policy
 
 ## 2. Entry Point
 Runner entry point is `main` in `benchmarks/runner.c`.
-The runner executes a fixed benchmark target set and emits benchmark artifacts.
+The runner discovers selected `.bench` files, executes runs, and appends raw rows.
 
-## 3. Build-Time Configuration
-Current configuration is compile-time controlled.
+## 3. Build-Time Defaults
+Defaults can be overridden at compile time.
 
-- `ITERATIONS` default `10`
-- `WARMUP_SECONDS` default `5.0`
-- `SIM_CYCLES` default `1000`
-- `HEBS_ENABLE_TITAN_BENCHES` default `0`
-- `HEBS_SKIP_ARTIFACTS` default `0`
-- `REVISION_NAME` default `Revision_Combinational_v05`
-- `METRICS_CSV_PATH` profile-dependent:
-  - perf profile: `benchmarks/results/metrics_history.csv`
-  - compat profile: `benchmarks/results/metrics_history_compat.csv`
-- `REPORT_HTML_PATH` default `benchmarks/results/revision_combinational_v05.html`
+- `DEFAULT_ITERATIONS` default `10`
+- `DEFAULT_SIM_CYCLES` default `1000`
+- `DEFAULT_WARMUP_SECONDS` default `5.0`
+- `DEFAULT_BENCH_ROOT` default `benchmarks/benches`
+- `RAW_CSV_PATH` default `benchmarks/results/raw_runner_output.csv`
+- `REVISION_NAME` default `Raw_Runner_v01`
 
-Probe profile selection is provided by `HEBS_COMPAT_PROBES_ENABLED` from `include/hebs_probe_profile.h`.
+Probe profile label is selected by `HEBS_COMPAT_PROBES_ENABLED`.
 
-## 4. Benchmark Target Model
-The runner currently uses a static benchmark target table.
-Target records are `hebs_bench_target_s` with:
+## 4. CLI Contract
+Supported arguments:
+
+- `--scope all|suite|bench`
+- `--suite <name>` required for `suite` and `bench` scopes
+- `--bench <file.bench>` required for `bench` scope
+- `--iterations <N>`
+- `--cycles <N>`
+- `--warmup-seconds <seconds>`
+- `--bench-root <path>`
+- `--output <path>`
+
+`all` discovers every suite directory below `bench_root` and every `.bench` file in each suite.
+`suite` discovers every `.bench` file in one suite.
+`bench` discovers one named `.bench` file in one suite.
+
+No benchmark names are hardcoded in execution logic.
+
+## 5. Target Discovery and Ordering
+Targets are discovered from the filesystem at runtime.
+Each target stores:
+
 - `suite_name`
+- `bench_file`
 - `bench_path`
 
-Default active targets:
-- ISCAS85: `c17`, `c432`, `c499`, `c6288`, `c880`
-- ISCAS89: `s27`, `s298`, `s382`, `s526`, `s820`
+Targets are sorted deterministically by `(suite_name, bench_file)`.
 
-Optional Titan targets are compiled in only when `HEBS_ENABLE_TITAN_BENCHES=1`.
-
-## 5. Execution Pipeline
-High-level flow:
-1. Run thermal warmup for `WARMUP_SECONDS`.
-2. Optionally load anchor GEPS mean from CSV using `lookup_revision_mean_geps`.
-3. Run hot-path profiling helper for `c6288` and print overhead diagnostics.
-4. Collect timestamp/date and git short hash.
-5. Iterate benchmark targets and run each via `hebs_run_single_bench`.
-6. Evaluate row-level regression and fingerprint checks.
-7. Emit HTML and CSV artifacts unless `HEBS_SKIP_ARTIFACTS=1`.
-8. Return exit code `0` on clean pass, `1` on any failure.
-
-## 6. Per-Benchmark Run Protocol
-Each benchmark run performs `ITERATIONS` independent runs.
+## 6. Execution Protocol
+For each target, runner executes `iterations` independent runs.
 Per iteration:
-1. Load plan from `.bench` via `hebs_load_bench`.
-2. Initialize engine via `hebs_init_engine`.
-3. For each cycle in `SIM_CYCLES`:
-   - Apply deterministic PI pattern based on `(cycle + pi) & 1U`.
-   - Call `hebs_tick`.
-4. Measure elapsed runtime with high-resolution timer helpers.
-5. Capture GEPS sample and final logic CRC32 fingerprint.
-6. Capture probes via `hebs_get_probes`.
 
-## 7. Derived Reporting Row
-Row schema is `hebs_metric_row_t` in `benchmarks/report_types.h`.
-The runner populates identity, topology, runtime statistics, activity metrics, history baselines, and probe profile metadata.
+1. Load plan with `hebs_load_bench`.
+2. Initialize engine with `hebs_init_engine`.
+3. Execute configured cycle count using deterministic PI pattern `(cycle + pi) & 1`.
+4. Measure wall time.
+5. Capture probes with `hebs_get_probes`.
+6. Capture final tray CRC with `hebs_crc32_signal_trays`.
+7. Append one raw CSV row.
 
-Profile-dependent behavior:
-- Compat profile enabled: transition-based counters are populated from probes.
-- Compat profile disabled: transition-based counters are forced to numeric `0`.
+## 7. Raw CSV Schema (Locked)
+Runner writes exactly one row per `(target, iteration)` with this header order:
 
-## 8. Validation and Failure Gates
-Current failure conditions in runner summary:
-- GEPS regression gate: fail if `geps_delta_prev_pct < -2.0`.
-- Determinism gate: fail if iteration CRC32 fingerprints are not stable.
-- Initialization or execution setup failure for a target is counted as failure.
-- Artifact write failure is counted as failure when artifact output is enabled.
+`run_id,revision,date,time,git_commit,suite,bench,mode,iteration,iterations_total,cycles,runtime_sec,plan_fingerprint,logic_crc32,probe_input_apply,probe_input_toggle,probe_chunk_exec,probe_gate_eval,probe_state_change_commit,probe_dff_exec,pi_count,gate_count,signal_count,propagation_depth,fanout_max,total_fanout_edges,compat_metrics_enabled`
 
-## 9. Artifact Contracts
-When artifact output is enabled:
-- HTML report is written by `generate_master_report`.
-- CSV history is appended by `append_metrics_history_csv`.
+Field policy:
 
-CSV append behavior:
-- Writes a revision metadata header line.
-- Writes fixed column header line.
-- Appends one row per benchmark result.
-- Leaves prior history rows intact.
+- Metadata fields: `run_id`, `revision`, `date`, `time`, `git_commit`, `suite`, `bench`, `mode`.
+- Run controls: `iteration`, `iterations_total`, `cycles`.
+- Raw timing/output: `runtime_sec`, `plan_fingerprint`, `logic_crc32`.
+- Approved raw probe fields only:
+  - `probe_input_apply`
+  - `probe_input_toggle`
+  - `probe_chunk_exec`
+  - `probe_gate_eval`
+  - `probe_state_change_commit`
+  - `probe_dff_exec`
+- Topology metadata from plan:
+  - `pi_count`
+  - `gate_count`
+  - `signal_count`
+  - `propagation_depth`
+  - `fanout_max`
+  - `total_fanout_edges`
+- Profile indicator: `compat_metrics_enabled`.
+
+The runner must not add derived metrics (for example GEPS, ICF, deltas, percentiles).
+The runner must not add or remove unrelated raw CSV fields outside explicitly approved schema changes.
+
+## 8. Failure Semantics
+Runner returns non-zero when any target iteration fails due to:
+
+- invalid CLI contract
+- discovery failure
+- plan load or engine init failure
+- PI set failure
+- CSV open/write failure
+
+Runner does not enforce quality thresholds or regression gates.
+
+## 9. Artifact Boundary
+Canonical runner output is raw CSV only.
+Derived metrics and reports are out of scope for this executable and should be implemented in separate tooling.
+
+Legacy metrics/history/report artifacts are non-canonical and must not be extended by this runner.
 
 ## 10. Tooling Boundary Rules
-Runner code must remain outside core engine implementation.
-Runner may read engine outputs and probes through public API only.
-Runner must not mutate engine internals directly.
-
-## 11. Non-Goals
-This specification does not define:
-- engine state model
-- engine execution semantics
-- probe implementation internals
-Those belong to engine-side technical documentation.
+Runner is a tooling client of engine public API.
+It must not mutate core internals directly.

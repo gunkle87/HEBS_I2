@@ -3,75 +3,57 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <math.h>
 #include <windows.h>
 #include "hebs_engine.h"
-#include "primitives.h"
 #include "timing_helper.h"
-#include "protocol_helper.h"
-#include "report_types.h"
-#include "html_report.h"
-#include "csv_export.h"
 
-#define ITERATIONS 10
-#define WARMUP_SECONDS 5.0
-#ifndef SIM_CYCLES
-#define SIM_CYCLES 1000
+#ifndef DEFAULT_ITERATIONS
+#define DEFAULT_ITERATIONS 10U
 #endif
-#ifndef HEBS_ENABLE_TITAN_BENCHES
-#define HEBS_ENABLE_TITAN_BENCHES 0
+#ifndef DEFAULT_SIM_CYCLES
+#define DEFAULT_SIM_CYCLES 1000U
 #endif
-#ifndef HEBS_SKIP_ARTIFACTS
-#define HEBS_SKIP_ARTIFACTS 0
+#ifndef DEFAULT_WARMUP_SECONDS
+#define DEFAULT_WARMUP_SECONDS 5.0
 #endif
-#define BENCH_ROOT "benchmarks/benches/"
-#define MAX_BENCH_RESULTS 256
+#ifndef DEFAULT_BENCH_ROOT
+#define DEFAULT_BENCH_ROOT "benchmarks/benches"
+#endif
+#ifndef RAW_CSV_PATH
+#define RAW_CSV_PATH "benchmarks/results/raw_runner_output.csv"
+#endif
 #ifndef REVISION_NAME
-#define REVISION_NAME "Revision_Combinational_v05"
+#define REVISION_NAME "Raw_Runner_v01"
 #endif
-#ifndef METRICS_CSV_PATH
-#if HEBS_COMPAT_PROBES_ENABLED
-#define METRICS_CSV_PATH "benchmarks/results/metrics_history_compat.csv"
-#else
-#define METRICS_CSV_PATH "benchmarks/results/metrics_history.csv"
-#endif
-#endif
-#ifndef REPORT_HTML_PATH
-#define REPORT_HTML_PATH "benchmarks/results/revision_combinational_v05.html"
-#endif
+
+typedef enum hebs_scope_e
+{
+	HEBS_SCOPE_ALL = 0,
+	HEBS_SCOPE_SUITE = 1,
+	HEBS_SCOPE_BENCH = 2
+
+} hebs_scope_t;
+
+typedef struct hebs_cli_options_s
+{
+	hebs_scope_t scope;
+	char suite_filter[64];
+	char bench_filter[128];
+	char bench_root[260];
+	char output_csv[260];
+	uint32_t iterations;
+	uint32_t cycles;
+	double warmup_seconds;
+
+} hebs_cli_options_t;
 
 typedef struct hebs_bench_target_s
 {
-	const char* suite_name;
-	const char* bench_path;
+	char suite_name[64];
+	char bench_file[128];
+	char bench_path[260];
 
 } hebs_bench_target_t;
-
-static const hebs_bench_target_t HEBS_BENCH_TARGETS[] =
-{
-	{ "ISCAS85", "benchmarks/benches/ISCAS85/c17.bench" },
-	{ "ISCAS85", "benchmarks/benches/ISCAS85/c432.bench" },
-	{ "ISCAS85", "benchmarks/benches/ISCAS85/c499.bench" },
-	{ "ISCAS85", "benchmarks/benches/ISCAS85/c6288.bench" },
-	{ "ISCAS85", "benchmarks/benches/ISCAS85/c880.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s27.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s298.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s382.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s526.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s820.bench" }
-#if HEBS_ENABLE_TITAN_BENCHES
-	,
-	{ "ISCAS85", "benchmarks/benches/ISCAS85/c7552.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s5378.bench" },
-	{ "ISCAS89", "benchmarks/benches/ISCAS89/s38584.bench" }
-#endif
-};
-
-#define HEBS_BENCH_TARGET_COUNT (sizeof(HEBS_BENCH_TARGETS) / sizeof(HEBS_BENCH_TARGETS[0]))
-
-static const char* HEBS_ANCHOR_TOKEN = "Revision_Structure_v07";
-static double HEBS_ANCHOR_GEPS_MEAN = 0.0;
-static int HEBS_ANCHOR_GEPS_VALID = 0;
 
 static const char* hebs_probe_profile_name(void)
 {
@@ -83,200 +65,58 @@ static const char* hebs_probe_profile_name(void)
 
 }
 
-static const char* hebs_basename_ptr(const char* path)
+static int hebs_is_dot_dir(const char* name)
 {
-	const char* slash_a;
-	const char* slash_b;
-	const char* base;
-
-	if (!path)
+	if (!name)
 	{
-		return "unknown";
+		return 0;
 
 	}
 
-	slash_a = strrchr(path, '/');
-	slash_b = strrchr(path, '\\');
-	base = path;
-	if (slash_a && slash_b)
-	{
-		base = (slash_a > slash_b) ? (slash_a + 1) : (slash_b + 1);
-
-	}
-	else if (slash_a)
-	{
-		base = slash_a + 1;
-
-	}
-	else if (slash_b)
-	{
-		base = slash_b + 1;
-
-	}
-
-	return base;
+	return (strcmp(name, ".") == 0 || strcmp(name, "..") == 0);
 
 }
 
-static void hebs_profile_c6288_hot_path(void)
-{
-	const char* bench_path;
-	hebs_plan* plan;
-	hebs_engine engine;
-	const uint32_t repeats = 3000U;
-	hebs_timer_t timer;
-	volatile uint64_t sink;
-	uint64_t overhead_gate_equiv_ops;
-	uint64_t gate_ops;
-	uint32_t repeat_idx;
-	double overhead_sec;
-	double nand_sec;
-	double xor_sec;
-	double overhead_ns_per_gate_equiv;
-	double nand_ns_per_op;
-	double xor_ns_per_op;
-	double overhead_share_pct;
-	uint32_t tray_idx;
-
-	bench_path = "benchmarks/benches/ISCAS85/c6288.bench";
-	plan = hebs_load_bench(bench_path);
-	if (!plan)
-	{
-		return;
-
-	}
-
-	memset(&engine, 0, sizeof(engine));
-	if (hebs_init_engine(&engine, plan) != HEBS_OK || plan->comb_instruction_count == 0U)
-	{
-		hebs_free_plan(plan);
-		return;
-
-	}
-
-	for (tray_idx = 0U; tray_idx < plan->tray_count; ++tray_idx)
-	{
-		engine.signal_trays[tray_idx] = 0x5555555555555555ULL ^ ((uint64_t)tray_idx * 0x0101010101010101ULL);
-		engine.next_signal_trays[tray_idx] = engine.signal_trays[tray_idx];
-
-	}
-
-	sink = 0U;
-	overhead_gate_equiv_ops = 0U;
-	timer_start(&timer);
-	for (repeat_idx = 0U; repeat_idx < repeats; ++repeat_idx)
-	{
-		uint32_t span_idx;
-		for (span_idx = 0U; span_idx < plan->comb_span_count; ++span_idx)
-		{
-			const hebs_gate_span_t* span = &plan->comb_spans[span_idx];
-			uint32_t processed = 0U;
-			while (processed < span->count)
-			{
-				const uint32_t chunk_count = ((span->count - processed) > 64U) ? 64U : (span->count - processed);
-				const uint32_t chunk_start = span->start + processed;
-				uint32_t idx;
-				for (idx = 0U; idx < chunk_count; ++idx)
-				{
-					const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[chunk_start + idx];
-					sink ^= (uint64_t)exec_instr->dst_tray;
-
-				}
-
-				processed += chunk_count;
-				overhead_gate_equiv_ops += chunk_count;
-
-			}
-
-		}
-
-	}
-	timer_stop(&timer);
-	overhead_sec = timer_elapsed_sec(&timer);
-
-	sink ^= (uint64_t)plan->comb_instruction_count;
-	gate_ops = (uint64_t)plan->comb_instruction_count * (uint64_t)repeats;
-	timer_start(&timer);
-	for (repeat_idx = 0U; repeat_idx < repeats; ++repeat_idx)
-	{
-		uint32_t instr_idx;
-		for (instr_idx = 0U; instr_idx < plan->comb_instruction_count; ++instr_idx)
-		{
-			const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[instr_idx];
-			const uint64_t a_lane = (engine.signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-			const uint64_t b_lane = (engine.signal_trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-			sink ^= hebs_gate_nand_simd(a_lane, b_lane);
-
-		}
-
-	}
-	timer_stop(&timer);
-	nand_sec = timer_elapsed_sec(&timer);
-
-	timer_start(&timer);
-	for (repeat_idx = 0U; repeat_idx < repeats; ++repeat_idx)
-	{
-		uint32_t instr_idx;
-		for (instr_idx = 0U; instr_idx < plan->comb_instruction_count; ++instr_idx)
-		{
-			const hebs_exec_instruction_t* exec_instr = &plan->comb_exec_data[instr_idx];
-			const uint64_t a_lane = (engine.signal_trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-			const uint64_t b_lane = (engine.signal_trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-			sink ^= hebs_gate_xor_simd(a_lane, b_lane);
-
-		}
-
-	}
-	timer_stop(&timer);
-	xor_sec = timer_elapsed_sec(&timer);
-
-	overhead_ns_per_gate_equiv = (overhead_gate_equiv_ops > 0U) ? ((overhead_sec * 1.0e9) / (double)overhead_gate_equiv_ops) : 0.0;
-	nand_ns_per_op = (gate_ops > 0U) ? ((nand_sec * 1.0e9) / (double)gate_ops) : 0.0;
-	xor_ns_per_op = (gate_ops > 0U) ? ((xor_sec * 1.0e9) / (double)gate_ops) : 0.0;
-	overhead_share_pct = ((overhead_ns_per_gate_equiv + nand_ns_per_op) > 0.0)
-		? (100.0 * overhead_ns_per_gate_equiv / (overhead_ns_per_gate_equiv + nand_ns_per_op))
-		: 0.0;
-
-	printf("\nHOT PATH PROFILE (c6288)\n");
-	printf("Configured batch chunk: %u\n", (unsigned int)HEBS_BATCH_GATE_CHUNK);
-	printf("Batch overhead ns/gate-equiv: %.3f\n", overhead_ns_per_gate_equiv);
-	printf("NAND math ns/op: %.3f\n", nand_ns_per_op);
-	printf("XOR math ns/op: %.3f\n", xor_ns_per_op);
-	printf("Overhead share vs NAND path: %.2f%%\n", overhead_share_pct);
-	printf("Profile sink: 0x%llX\n", (unsigned long long)sink);
-
-	hebs_free_plan(plan);
-
-}
-
-static void hebs_strip_extension(const char* in, char* out, size_t out_size)
+static int hebs_has_bench_extension(const char* name)
 {
 	const char* dot;
-	size_t copy_len;
 
-	if (!out || out_size == 0U)
+	if (!name)
 	{
-		return;
+		return 0;
 
 	}
 
-	if (!in)
+	dot = strrchr(name, '.');
+	if (!dot)
 	{
-		out[0] = '\0';
-		return;
+		return 0;
 
 	}
 
-	dot = strrchr(in, '.');
-	copy_len = dot ? (size_t)(dot - in) : strlen(in);
-	if (copy_len >= out_size)
+	return (_stricmp(dot, ".bench") == 0);
+
+}
+
+static int hebs_copy_text_fit(char* out, size_t out_size, const char* text)
+{
+	size_t length;
+
+	if (!out || out_size == 0U || !text)
 	{
-		copy_len = out_size - 1U;
+		return 0;
 
 	}
 
-	memcpy(out, in, copy_len);
-	out[copy_len] = '\0';
+	length = strlen(text);
+	if (length >= out_size)
+	{
+		return 0;
+
+	}
+
+	memcpy(out, text, length + 1U);
+	return 1;
 
 }
 
@@ -334,16 +174,17 @@ static void hebs_get_git_commit_hash(char* out, size_t out_size)
 
 }
 
-static void hebs_warmup(void)
+static void hebs_warmup(double warmup_seconds)
 {
 	hebs_timer_t timer;
-	printf("HEBS_CLEAN: Thermal Warm-up (%.0f s)...\n", WARMUP_SECONDS);
+
+	printf("HEBS_CLEAN: Thermal Warm-up (%.0f s)...\n", warmup_seconds);
 	timer_start(&timer);
 	do
 	{
 		timer_stop(&timer);
 
-	} while (timer_elapsed_sec(&timer) < WARMUP_SECONDS);
+	} while (timer_elapsed_sec(&timer) < warmup_seconds);
 
 }
 
@@ -399,200 +240,649 @@ static uint32_t hebs_crc32_signal_trays(const hebs_engine* engine)
 
 }
 
-static double hebs_binary_entropy(double p)
+static void hebs_print_usage(const char* exe)
 {
-	if (p <= 0.0 || p >= 1.0)
-	{
-		return 0.0;
-
-	}
-
-	return -(p * (log(p) / log(2.0)) + (1.0 - p) * (log(1.0 - p) / log(2.0)));
+	printf("Usage:\n");
+	printf("  %s [--scope all|suite|bench] [--suite NAME] [--bench FILE] [--iterations N] [--cycles N] [--warmup-seconds X] [--bench-root PATH] [--output PATH]\n", exe ? exe : "hebs_cli");
+	printf("Examples:\n");
+	printf("  hebs_cli --scope all\n");
+	printf("  hebs_cli --scope suite --suite <suite_name>\n");
+	printf("  hebs_cli --scope bench --suite <suite_name> --bench <bench_file.bench>\n");
 
 }
 
-static void hebs_finalize_metric_row(hebs_metric_row_t* row, const double* runtimes, const double* geps_runs)
+static int hebs_parse_u32(const char* text, uint32_t* out_value)
 {
-	double cycles_d;
-	double gates_d;
-	double toggles_d;
-	double fanout_avg;
+	char* end_ptr;
+	unsigned long value;
 
-	cycles_d = (double)row->cycles;
-	gates_d = (double)row->gate_count;
-	toggles_d = (double)row->total_toggles;
-
-	row->runtime_min = calculate_min(runtimes, ITERATIONS);
-	row->runtime_max = calculate_max(runtimes, ITERATIONS);
-	row->runtime_p50 = calculate_p50(runtimes, ITERATIONS);
-	row->runtime_p90 = calculate_percentile(runtimes, ITERATIONS, 90.0);
-	row->runtime_p95 = calculate_percentile(runtimes, ITERATIONS, 95.0);
-	row->runtime_p99 = calculate_percentile(runtimes, ITERATIONS, 99.0);
-	row->runtime_mean = calculate_mean(runtimes, ITERATIONS);
-	row->runtime_variance = calculate_variance(runtimes, ITERATIONS);
-	row->runtime_stddev = calculate_stddev(runtimes, ITERATIONS);
-
-	row->geps_min = calculate_min(geps_runs, ITERATIONS);
-	row->geps_max = calculate_max(geps_runs, ITERATIONS);
-	row->geps_p50 = calculate_p50(geps_runs, ITERATIONS);
-	row->gates_per_second = row->geps_p50;
-	row->icf = calculate_icf(row->internal_transitions, row->primary_input_transitions);
-
-	row->total_runtime = row->runtime_p50;
-	row->throughput = (row->runtime_p50 > 0.0) ? (cycles_d / row->runtime_p50) : 0.0;
-	row->latency_per_cycle = (cycles_d > 0.0) ? (row->runtime_p50 / cycles_d) : 0.0;
-	row->latency_per_vector = row->latency_per_cycle;
-	row->speedup = (row->runtime_p50 > 0.0) ? (row->runtime_max / row->runtime_p50) : 0.0;
-	row->efficiency = (row->runtime_max > 0.0) ? (row->runtime_p50 / row->runtime_max) : 0.0;
-
-	row->events_per_second = (row->runtime_p50 > 0.0) ? (toggles_d / row->runtime_p50) : 0.0;
-	row->edges_per_second = row->events_per_second;
-	row->vector_throughput = row->throughput;
-	row->cycles_per_second = row->throughput;
-
-	row->cycles_per_vector = 1.0;
-	row->gates_per_cycle = (cycles_d > 0.0) ? (gates_d) : 0.0;
-	row->events_per_cycle = (cycles_d > 0.0) ? (toggles_d / cycles_d) : 0.0;
-	row->events_per_vector = row->events_per_cycle;
-	row->net_transitions_per_cycle = row->events_per_cycle;
-
-	fanout_avg = (row->signal_count > 0U) ? ((double)row->total_fanout_edges / (double)row->signal_count) : 0.0;
-	row->fanout_avg = fanout_avg;
-	row->fanout_activity = fanout_avg * row->events_per_cycle;
-	row->toggle_rate = row->icf;
-	row->activity_factor = row->icf;
-	row->event_density = (gates_d > 0.0) ? (row->events_per_cycle / gates_d) : 0.0;
-	row->work_per_event = (row->events_per_cycle > 0.0) ? (gates_d / row->events_per_cycle) : 0.0;
-	row->evals_per_event = (toggles_d > 0.0) ? ((gates_d * cycles_d) / toggles_d) : 0.0;
-
-	row->simulated_time_per_second = row->cycles_per_second;
-	row->wallclock_per_sim_cycle = row->latency_per_cycle;
-	row->utilized_edges_ratio = row->event_density;
-	row->queue_utilization = row->event_density;
-
-	row->critical_path_eval_rate = (row->runtime_p50 > 0.0) ? ((double)row->propagation_depth / row->runtime_p50) : 0.0;
-	row->gate_density = (row->signal_count > 0U) ? ((double)row->gate_count / (double)row->signal_count) : 0.0;
-	row->transition_entropy = hebs_binary_entropy(row->activity_factor);
-
-}
-
-static void hebs_apply_history_and_guardrail(hebs_metric_row_t* row)
-{
-	double base_geps;
-	double prev_geps;
-	double base_icf;
-	double prev_icf;
-
-	row->base_geps_p50 = row->geps_p50;
-	row->prev_geps_p50 = row->geps_p50;
-	row->base_icf = row->icf;
-	row->prev_icf = row->icf;
-	row->geps_delta_prev_pct = 0.0;
-	row->icf_delta_prev_pct = 0.0;
-	row->geps_regression_fail = 0U;
-
-	if (!lookup_history_for_bench_suite(
-		METRICS_CSV_PATH,
-		row->suite_name,
-		row->benchmark,
-		&base_geps,
-		&prev_geps,
-		&base_icf,
-		&prev_icf))
-	{
-		return;
-
-	}
-
-	row->base_geps_p50 = base_geps;
-	row->prev_geps_p50 = prev_geps;
-	row->base_icf = base_icf;
-	row->prev_icf = prev_icf;
-	if (HEBS_ANCHOR_GEPS_VALID && strncmp(REVISION_NAME, "Revision_Combinational_", 23U) == 0)
-	{
-		row->base_geps_p50 = HEBS_ANCHOR_GEPS_MEAN;
-
-	}
-
-	if (prev_geps > 0.0)
-	{
-		row->geps_delta_prev_pct = ((row->geps_p50 - prev_geps) / prev_geps) * 100.0;
-		if (row->geps_delta_prev_pct < -2.0)
-		{
-			row->geps_regression_fail = 1U;
-
-		}
-
-	}
-
-	if (prev_icf > 0.0)
-	{
-		row->icf_delta_prev_pct = ((row->icf - prev_icf) / prev_icf) * 100.0;
-
-	}
-
-}
-
-static int hebs_run_single_bench(const char* suite_name, const char* bench_path, hebs_metric_row_t* out_row)
-{
-	double runtimes[ITERATIONS];
-	double geps_runs[ITERATIONS];
-	uint32_t crc_runs[ITERATIONS];
-	hebs_probes probes;
-	uint64_t total_toggles;
-	uint64_t total_primary_input_transitions;
-	uint64_t total_internal_transitions;
-	uint32_t total_cycles;
-	uint32_t stable_crc;
-	int crc_stable;
-	int i;
-
-	if (!suite_name || !bench_path || !out_row)
+	if (!text || !out_value)
 	{
 		return 0;
 
 	}
 
-	memset(out_row, 0, sizeof(*out_row));
-	snprintf(out_row->suite_name, sizeof(out_row->suite_name), "%s", suite_name);
-	snprintf(out_row->probe_profile, sizeof(out_row->probe_profile), "%s", hebs_probe_profile_name());
-	out_row->compat_metrics_enabled = (uint8_t)HEBS_COMPAT_PROBES_ENABLED;
-	total_toggles = 0U;
-	total_primary_input_transitions = 0U;
-	total_internal_transitions = 0U;
-	total_cycles = 0U;
-	crc_stable = 1;
-	stable_crc = 0U;
-
-	printf("\nBENCH: %s/%s\n", suite_name, bench_path);
-
-	for (i = 0; i < ITERATIONS; ++i)
+	value = strtoul(text, &end_ptr, 10);
+	if (*text == '\0' || *end_ptr != '\0' || value > 0xFFFFFFFFUL)
 	{
-		hebs_plan* plan = hebs_load_bench(bench_path);
+		return 0;
+
+	}
+
+	*out_value = (uint32_t)value;
+	return 1;
+
+}
+
+static int hebs_parse_double(const char* text, double* out_value)
+{
+	char* end_ptr;
+	double value;
+
+	if (!text || !out_value)
+	{
+		return 0;
+
+	}
+
+	value = strtod(text, &end_ptr);
+	if (*text == '\0' || *end_ptr != '\0')
+	{
+		return 0;
+
+	}
+
+	*out_value = value;
+	return 1;
+
+}
+
+static int hebs_parse_scope(const char* text, hebs_scope_t* out_scope)
+{
+	if (!text || !out_scope)
+	{
+		return 0;
+
+	}
+
+	if (_stricmp(text, "all") == 0)
+	{
+		*out_scope = HEBS_SCOPE_ALL;
+		return 1;
+
+	}
+
+	if (_stricmp(text, "suite") == 0)
+	{
+		*out_scope = HEBS_SCOPE_SUITE;
+		return 1;
+
+	}
+
+	if (_stricmp(text, "bench") == 0)
+	{
+		*out_scope = HEBS_SCOPE_BENCH;
+		return 1;
+
+	}
+
+	return 0;
+
+}
+
+static int hebs_parse_cli(int argc, char** argv, hebs_cli_options_t* opts)
+{
+	int idx;
+
+	if (!opts)
+	{
+		return 0;
+
+	}
+
+	memset(opts, 0, sizeof(*opts));
+	opts->scope = HEBS_SCOPE_ALL;
+	opts->iterations = DEFAULT_ITERATIONS;
+	opts->cycles = DEFAULT_SIM_CYCLES;
+	opts->warmup_seconds = DEFAULT_WARMUP_SECONDS;
+	snprintf(opts->bench_root, sizeof(opts->bench_root), "%s", DEFAULT_BENCH_ROOT);
+	snprintf(opts->output_csv, sizeof(opts->output_csv), "%s", RAW_CSV_PATH);
+
+	for (idx = 1; idx < argc; ++idx)
+	{
+		const char* arg = argv[idx];
+		if (strcmp(arg, "--scope") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_scope(argv[idx + 1], &opts->scope))
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--suite") == 0)
+		{
+			if (idx + 1 >= argc)
+			{
+				return 0;
+
+			}
+			snprintf(opts->suite_filter, sizeof(opts->suite_filter), "%s", argv[idx + 1]);
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--bench") == 0)
+		{
+			if (idx + 1 >= argc)
+			{
+				return 0;
+
+			}
+			snprintf(opts->bench_filter, sizeof(opts->bench_filter), "%s", argv[idx + 1]);
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--iterations") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_u32(argv[idx + 1], &opts->iterations) || opts->iterations == 0U)
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--cycles") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_u32(argv[idx + 1], &opts->cycles) || opts->cycles == 0U)
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--warmup-seconds") == 0)
+		{
+			if (idx + 1 >= argc || !hebs_parse_double(argv[idx + 1], &opts->warmup_seconds) || opts->warmup_seconds < 0.0)
+			{
+				return 0;
+
+			}
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--bench-root") == 0)
+		{
+			if (idx + 1 >= argc)
+			{
+				return 0;
+
+			}
+			snprintf(opts->bench_root, sizeof(opts->bench_root), "%s", argv[idx + 1]);
+			++idx;
+			continue;
+
+		}
+
+		if (strcmp(arg, "--output") == 0)
+		{
+			if (idx + 1 >= argc)
+			{
+				return 0;
+
+			}
+			snprintf(opts->output_csv, sizeof(opts->output_csv), "%s", argv[idx + 1]);
+			++idx;
+			continue;
+
+		}
+
+		return 0;
+
+	}
+
+	if (opts->scope == HEBS_SCOPE_SUITE && opts->suite_filter[0] == '\0')
+	{
+		return 0;
+
+	}
+
+	if (opts->scope == HEBS_SCOPE_BENCH && (opts->suite_filter[0] == '\0' || opts->bench_filter[0] == '\0'))
+	{
+		return 0;
+
+	}
+
+	return 1;
+
+}
+
+static int hebs_reserve_targets(hebs_bench_target_t** targets, uint32_t needed, uint32_t* capacity)
+{
+	hebs_bench_target_t* resized;
+	uint32_t new_capacity;
+
+	if (!targets || !capacity)
+	{
+		return 0;
+
+	}
+
+	if (needed <= *capacity)
+	{
+		return 1;
+
+	}
+
+	new_capacity = (*capacity == 0U) ? 16U : (*capacity * 2U);
+	while (new_capacity < needed)
+	{
+		new_capacity *= 2U;
+
+	}
+
+	resized = (hebs_bench_target_t*)realloc(*targets, (size_t)new_capacity * sizeof(hebs_bench_target_t));
+	if (!resized)
+	{
+		return 0;
+
+	}
+
+	*targets = resized;
+	*capacity = new_capacity;
+	return 1;
+
+}
+
+static int hebs_append_target(
+	hebs_bench_target_t** targets,
+	uint32_t* count,
+	uint32_t* capacity,
+	const char* suite_name,
+	const char* bench_file,
+	const char* bench_path)
+{
+	hebs_bench_target_t* slot;
+
+	if (!targets || !count || !capacity || !suite_name || !bench_file || !bench_path)
+	{
+		return 0;
+
+	}
+
+	if (!hebs_reserve_targets(targets, *count + 1U, capacity))
+	{
+		return 0;
+
+	}
+
+	slot = &(*targets)[*count];
+	if (!hebs_copy_text_fit(slot->suite_name, sizeof(slot->suite_name), suite_name) ||
+		!hebs_copy_text_fit(slot->bench_file, sizeof(slot->bench_file), bench_file) ||
+		!hebs_copy_text_fit(slot->bench_path, sizeof(slot->bench_path), bench_path))
+	{
+		return 0;
+
+	}
+
+	++(*count);
+	return 1;
+
+}
+
+static int hebs_compare_targets(const void* lhs, const void* rhs)
+{
+	const hebs_bench_target_t* a = (const hebs_bench_target_t*)lhs;
+	const hebs_bench_target_t* b = (const hebs_bench_target_t*)rhs;
+	int suite_cmp = strcmp(a->suite_name, b->suite_name);
+	if (suite_cmp != 0)
+	{
+		return suite_cmp;
+
+	}
+
+	return strcmp(a->bench_file, b->bench_file);
+
+}
+
+static int hebs_discover_suite_targets(
+	const char* bench_root,
+	const char* suite_name,
+	const char* bench_filter,
+	hebs_bench_target_t** out_targets,
+	uint32_t* out_count,
+	uint32_t* out_capacity)
+{
+	char pattern[512];
+	WIN32_FIND_DATAA find_data;
+	HANDLE find_handle;
+
+	if (!bench_root || !suite_name || !out_targets || !out_count || !out_capacity)
+	{
+		return 0;
+
+	}
+
+	snprintf(pattern, sizeof(pattern), "%s/%s/%s", bench_root, suite_name, bench_filter ? bench_filter : "*.bench");
+	find_handle = FindFirstFileA(pattern, &find_data);
+	if (find_handle == INVALID_HANDLE_VALUE)
+	{
+		return 1;
+
+	}
+
+	do
+	{
+		char bench_path[512];
+		if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			continue;
+
+		}
+
+		if (!hebs_has_bench_extension(find_data.cFileName))
+		{
+			continue;
+
+		}
+
+		snprintf(bench_path, sizeof(bench_path), "%s/%s/%s", bench_root, suite_name, find_data.cFileName);
+		if (!hebs_append_target(out_targets, out_count, out_capacity, suite_name, find_data.cFileName, bench_path))
+		{
+			FindClose(find_handle);
+			return 0;
+
+		}
+
+	} while (FindNextFileA(find_handle, &find_data) != 0);
+
+	FindClose(find_handle);
+	return 1;
+
+}
+
+static int hebs_discover_all_targets(
+	const char* bench_root,
+	hebs_bench_target_t** out_targets,
+	uint32_t* out_count,
+	uint32_t* out_capacity)
+{
+	char pattern[512];
+	WIN32_FIND_DATAA find_data;
+	HANDLE find_handle;
+
+	if (!bench_root || !out_targets || !out_count || !out_capacity)
+	{
+		return 0;
+
+	}
+
+	snprintf(pattern, sizeof(pattern), "%s/*", bench_root);
+	find_handle = FindFirstFileA(pattern, &find_data);
+	if (find_handle == INVALID_HANDLE_VALUE)
+	{
+		return 1;
+
+	}
+
+	do
+	{
+		if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0U)
+		{
+			continue;
+
+		}
+
+		if (hebs_is_dot_dir(find_data.cFileName))
+		{
+			continue;
+
+		}
+
+		if (!hebs_discover_suite_targets(bench_root, find_data.cFileName, NULL, out_targets, out_count, out_capacity))
+		{
+			FindClose(find_handle);
+			return 0;
+
+		}
+
+	} while (FindNextFileA(find_handle, &find_data) != 0);
+
+	FindClose(find_handle);
+	return 1;
+
+}
+
+static int hebs_discover_targets(const hebs_cli_options_t* opts, hebs_bench_target_t** out_targets, uint32_t* out_count)
+{
+	hebs_bench_target_t* targets;
+	uint32_t count;
+	uint32_t capacity;
+
+	if (!opts || !out_targets || !out_count)
+	{
+		return 0;
+
+	}
+
+	targets = NULL;
+	count = 0U;
+	capacity = 0U;
+
+	if (opts->scope == HEBS_SCOPE_ALL)
+	{
+		if (!hebs_discover_all_targets(opts->bench_root, &targets, &count, &capacity))
+		{
+			free(targets);
+			return 0;
+
+		}
+
+	}
+	else if (opts->scope == HEBS_SCOPE_SUITE)
+	{
+		if (!hebs_discover_suite_targets(opts->bench_root, opts->suite_filter, NULL, &targets, &count, &capacity))
+		{
+			free(targets);
+			return 0;
+
+		}
+
+	}
+	else
+	{
+		if (!hebs_discover_suite_targets(opts->bench_root, opts->suite_filter, opts->bench_filter, &targets, &count, &capacity))
+		{
+			free(targets);
+			return 0;
+
+		}
+
+	}
+
+	if (count > 1U)
+	{
+		qsort(targets, count, sizeof(targets[0]), hebs_compare_targets);
+
+	}
+
+	*out_targets = targets;
+	*out_count = count;
+	return 1;
+
+}
+
+static int hebs_csv_file_is_empty(const char* output_path)
+{
+	FILE* file;
+	long size;
+
+	if (!output_path)
+	{
+		return 1;
+
+	}
+
+	file = fopen(output_path, "rb");
+	if (!file)
+	{
+		return 1;
+
+	}
+
+	if (fseek(file, 0L, SEEK_END) != 0)
+	{
+		fclose(file);
+		return 1;
+
+	}
+
+	size = ftell(file);
+	fclose(file);
+	return (size <= 0L);
+
+}
+
+static int hebs_write_raw_header(FILE* csv_file)
+{
+	if (!csv_file)
+	{
+		return 0;
+
+	}
+
+	fprintf(
+		csv_file,
+		"run_id,revision,date,time,git_commit,suite,bench,mode,iteration,iterations_total,cycles,runtime_sec,plan_fingerprint,logic_crc32,probe_input_apply,probe_input_toggle,probe_chunk_exec,probe_gate_eval,probe_state_change_commit,probe_dff_exec,pi_count,gate_count,signal_count,propagation_depth,fanout_max,total_fanout_edges,compat_metrics_enabled\n");
+	return (ferror(csv_file) == 0);
+
+}
+
+static int hebs_write_raw_row(
+	FILE* csv_file,
+	const char* run_id,
+	const char* revision,
+	const char* date_text,
+	const char* time_text,
+	const char* git_hash,
+	const char* suite,
+	const char* bench,
+	const char* mode,
+	uint32_t iteration_index,
+	uint32_t iterations_total,
+	uint32_t cycles,
+	double runtime_sec,
+	uint64_t plan_fingerprint,
+	uint32_t logic_crc32,
+	const hebs_probes* probes,
+	const hebs_plan* plan)
+{
+	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan)
+	{
+		return 0;
+
+	}
+
+	fprintf(
+		csv_file,
+		"%s,%s,%s,%s,%s,%s,%s,%s,%u,%u,%u,%.9f,0x%llX,0x%08X,%llu,%llu,%llu,%llu,%llu,%llu,%u,%u,%u,%u,%u,%u,%u\n",
+		run_id,
+		revision,
+		date_text,
+		time_text,
+		git_hash,
+		suite,
+		bench,
+		mode,
+		iteration_index,
+		iterations_total,
+		cycles,
+		runtime_sec,
+		(unsigned long long)plan_fingerprint,
+		(unsigned int)logic_crc32,
+		(unsigned long long)probes->input_apply,
+		(unsigned long long)probes->input_toggle,
+		(unsigned long long)probes->chunk_exec,
+		(unsigned long long)probes->gate_eval,
+		(unsigned long long)probes->state_change_commit,
+		(unsigned long long)probes->dff_exec,
+		plan->num_primary_inputs,
+		plan->gate_count,
+		plan->signal_count,
+		plan->propagation_depth,
+		plan->fanout_max,
+		plan->total_fanout_edges,
+		(unsigned int)HEBS_COMPAT_PROBES_ENABLED);
+
+	return (ferror(csv_file) == 0);
+
+}
+
+static int hebs_run_single_bench(
+	const hebs_cli_options_t* opts,
+	const hebs_bench_target_t* target,
+	const char* run_id,
+	const char* revision,
+	const char* date_text,
+	const char* time_text,
+	const char* git_hash,
+	FILE* csv_file)
+{
+	uint32_t iter;
+
+	if (!opts || !target || !run_id || !revision || !date_text || !time_text || !git_hash || !csv_file)
+	{
+		return 0;
+
+	}
+
+	printf("\nBENCH: %s/%s\n", target->suite_name, target->bench_file);
+
+	for (iter = 0U; iter < opts->iterations; ++iter)
+	{
+		hebs_plan* plan = hebs_load_bench(target->bench_path);
 		hebs_engine engine = { 0 };
 		hebs_timer_t timer;
+		hebs_probes probes;
+		uint32_t crc32;
+		double elapsed;
 		uint32_t cycle;
 
 		if (!plan || hebs_init_engine(&engine, plan) != HEBS_OK)
 		{
-			printf("Iteration %d: init failed\n", i + 1);
+			printf("Iteration %u: init failed\n", iter + 1U);
 			hebs_free_plan(plan);
 			return 0;
 
 		}
 
 		timer_start(&timer);
-		for (cycle = 0; cycle < SIM_CYCLES; ++cycle)
+		for (cycle = 0U; cycle < opts->cycles; ++cycle)
 		{
 			uint32_t pi;
-			for (pi = 0; pi < plan->num_primary_inputs && pi < HEBS_MAX_PRIMARY_INPUTS; ++pi)
+			for (pi = 0U; pi < plan->num_primary_inputs && pi < HEBS_MAX_PRIMARY_INPUTS; ++pi)
 			{
 				hebs_logic_t value = ((cycle + pi) & 1U) ? HEBS_S1 : HEBS_S0;
 				if (hebs_set_primary_input(&engine, plan, pi, value) != HEBS_OK)
 				{
-					printf("Iteration %d: input set failed\n", i + 1);
+					printf("Iteration %u: input set failed\n", iter + 1U);
 					hebs_free_plan(plan);
 					return 0;
+
 				}
 
 			}
@@ -600,43 +890,35 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 			hebs_tick(&engine, plan);
 
 		}
-
 		timer_stop(&timer);
-		runtimes[i] = timer_elapsed_sec(&timer);
-		geps_runs[i] = (runtimes[i] > 0.0) ? (((double)plan->gate_count * (double)SIM_CYCLES) / runtimes[i]) : 0.0;
-		crc_runs[i] = hebs_crc32_signal_trays(&engine);
+
+		elapsed = timer_elapsed_sec(&timer);
 		probes = hebs_get_probes(&engine);
+		crc32 = hebs_crc32_signal_trays(&engine);
+		printf("Iteration %u: %.9f sec\n", iter + 1U, elapsed);
 
-		if (i == 0)
+		if (!hebs_write_raw_row(
+			csv_file,
+			run_id,
+			revision,
+			date_text,
+			time_text,
+			git_hash,
+			target->suite_name,
+			target->bench_file,
+			hebs_probe_profile_name(),
+			iter + 1U,
+			opts->iterations,
+			opts->cycles,
+			elapsed,
+			plan->lep_hash,
+			crc32,
+			&probes,
+			plan))
 		{
-			stable_crc = crc_runs[i];
-
-		}
-		else if (crc_runs[i] != stable_crc)
-		{
-			crc_stable = 0;
-
-		}
-
-		total_toggles += probes.input_toggle;
-		total_primary_input_transitions += probes.input_toggle;
-		total_internal_transitions += probes.state_change_commit;
-		total_cycles += (uint32_t)engine.current_tick;
-		printf("Iteration %d: %.9f sec\n", i + 1, runtimes[i]);
-
-		if (i == ITERATIONS - 1)
-		{
-			char bench_name[128];
-			hebs_strip_extension(hebs_basename_ptr(bench_path), bench_name, sizeof(bench_name));
-			snprintf(out_row->benchmark, sizeof(out_row->benchmark), "%s", bench_name);
-			out_row->pi_count = plan->num_primary_inputs;
-			out_row->cycles = total_cycles;
-			out_row->gate_count = plan->gate_count;
-			out_row->signal_count = plan->signal_count;
-			out_row->propagation_depth = plan->propagation_depth;
-			out_row->fanout_max = plan->fanout_max;
-			out_row->total_fanout_edges = plan->total_fanout_edges;
-			out_row->plan_fingerprint = plan->lep_hash;
+			printf("Iteration %u: raw CSV write failed\n", iter + 1U);
+			hebs_free_plan(plan);
+			return 0;
 
 		}
 
@@ -644,159 +926,99 @@ static int hebs_run_single_bench(const char* suite_name, const char* bench_path,
 
 	}
 
-	out_row->logic_fingerprint = stable_crc;
-	out_row->fingerprint_stable = (uint8_t)crc_stable;
-#if HEBS_COMPAT_PROBES_ENABLED
-	out_row->total_toggles = total_toggles;
-	out_row->primary_input_transitions = total_primary_input_transitions;
-	out_row->internal_transitions = total_internal_transitions;
-#else
-	out_row->total_toggles = 0U;
-	out_row->primary_input_transitions = 0U;
-	out_row->internal_transitions = 0U;
-#endif
-	hebs_finalize_metric_row(out_row, runtimes, geps_runs);
-	hebs_apply_history_and_guardrail(out_row);
-
-	printf("\n--- FINAL REPORT (p50 Median) ---\n");
-	printf("Runtime Low: %.9f sec\n", out_row->runtime_min);
-	printf("Runtime High: %.9f sec\n", out_row->runtime_max);
-	printf("Median Runtime: %.9f sec\n", out_row->runtime_p50);
-	printf("Active Primary Inputs: %u\n", out_row->pi_count);
-	printf("Programmatic Gate Count: %u\n", out_row->gate_count);
-	printf("Propagation Depth: %u\n", out_row->propagation_depth);
-	printf("Fanout Max: %u\n", out_row->fanout_max);
-	printf("Base/Prev/Cur GEPS: %.2f / %.2f / %.2f\n", out_row->base_geps_p50, out_row->prev_geps_p50, out_row->geps_p50);
-	if (HEBS_ANCHOR_GEPS_VALID && strncmp(REVISION_NAME, "Revision_Combinational_", 23U) == 0 && out_row->base_geps_p50 > 0.0)
-	{
-		double anchor_delta = ((out_row->geps_p50 - out_row->base_geps_p50) / out_row->base_geps_p50) * 100.0;
-		printf("GEPS Delta Anchor vs Cur: %.2f%%\n", anchor_delta);
-
-	}
-	printf("Base/Prev/Cur ICF: %.6f / %.6f / %.6f\n", out_row->base_icf, out_row->prev_icf, out_row->icf);
-	printf("GEPS Delta Prev vs Cur: %.2f%%\n", out_row->geps_delta_prev_pct);
-	printf("Probe Profile: %s (compat_metrics_enabled=%u)\n", out_row->probe_profile, out_row->compat_metrics_enabled);
-	printf("Logic CRC32: 0x%08X (stable=%s)\n", (unsigned int)out_row->logic_fingerprint, out_row->fingerprint_stable ? "YES" : "NO");
-	printf("---------------------------------\n");
 	return 1;
 
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
-	hebs_metric_row_t registry[MAX_BENCH_RESULTS];
+	hebs_cli_options_t options;
+	hebs_bench_target_t* targets;
+	uint32_t target_count;
 	char timestamp[32];
 	char date_text[32];
 	char git_hash[64];
-	int result_count;
+	char run_id[256];
+	FILE* csv_file;
+	int processed;
 	int failures;
 	uint32_t target_idx;
+	int file_was_empty;
 
-	result_count = 0;
-	failures = 0;
-
-	hebs_warmup();
-	if (lookup_revision_mean_geps(METRICS_CSV_PATH, HEBS_ANCHOR_TOKEN, &HEBS_ANCHOR_GEPS_MEAN))
+	if (!hebs_parse_cli(argc, argv, &options))
 	{
-		HEBS_ANCHOR_GEPS_VALID = 1;
-		printf("Anchor GEPS (%s mean): %.2f\n", HEBS_ANCHOR_TOKEN, HEBS_ANCHOR_GEPS_MEAN);
-
-	}
-	else
-	{
-		HEBS_ANCHOR_GEPS_VALID = 0;
+		hebs_print_usage((argc > 0) ? argv[0] : "hebs_cli");
+		return 1;
 
 	}
 
-	hebs_profile_c6288_hot_path();
+	targets = NULL;
+	target_count = 0U;
+	if (!hebs_discover_targets(&options, &targets, &target_count))
+	{
+		printf("Target discovery failed.\n");
+		return 1;
+
+	}
+
+	if (target_count == 0U)
+	{
+		printf("No benchmark targets discovered.\n");
+		free(targets);
+		return 1;
+
+	}
+
 	hebs_get_run_clock(timestamp, sizeof(timestamp), date_text, sizeof(date_text));
 	hebs_get_git_commit_hash(git_hash, sizeof(git_hash));
+	snprintf(run_id, sizeof(run_id), "%s|%s|%s|%s|%s", REVISION_NAME, date_text, timestamp, git_hash, hebs_probe_profile_name());
 
-	for (target_idx = 0U; target_idx < HEBS_BENCH_TARGET_COUNT; ++target_idx)
+	hebs_warmup(options.warmup_seconds);
+
+	file_was_empty = hebs_csv_file_is_empty(options.output_csv);
+	csv_file = fopen(options.output_csv, "a");
+	if (!csv_file)
 	{
-		const hebs_bench_target_t* target = &HEBS_BENCH_TARGETS[target_idx];
-		if (result_count >= MAX_BENCH_RESULTS)
+		printf("Failed to open raw CSV output: %s\n", options.output_csv);
+		free(targets);
+		return 1;
+
+	}
+
+	if (file_was_empty)
+	{
+		if (!hebs_write_raw_header(csv_file))
 		{
-			++failures;
-			break;
+			printf("Failed to write raw CSV header: %s\n", options.output_csv);
+			fclose(csv_file);
+			free(targets);
+			return 1;
 
 		}
 
-		if (!hebs_run_single_bench(target->suite_name, target->bench_path, &registry[result_count]))
+	}
+
+	processed = 0;
+	failures = 0;
+	for (target_idx = 0U; target_idx < target_count; ++target_idx)
+	{
+		const hebs_bench_target_t* target = &targets[target_idx];
+		if (!hebs_run_single_bench(&options, target, run_id, REVISION_NAME, date_text, timestamp, git_hash, csv_file))
 		{
 			++failures;
 			continue;
 
 		}
 
-		if (registry[result_count].geps_regression_fail)
-		{
-			printf("REGRESSION FAIL: %s/%s p50 GEPS dropped %.2f%% versus previous.\n", registry[result_count].suite_name, registry[result_count].benchmark, -registry[result_count].geps_delta_prev_pct);
-			++failures;
-
-		}
-
-		if (!registry[result_count].fingerprint_stable)
-		{
-			printf("FINGERPRINT FAIL: %s/%s tray CRC32 unstable.\n", registry[result_count].suite_name, registry[result_count].benchmark);
-			++failures;
-
-		}
-
-		++result_count;
+		++processed;
 
 	}
 
-	if (result_count > 0)
-	{
-		if (!HEBS_SKIP_ARTIFACTS)
-		{
-			if (!generate_master_report(
-				registry,
-				result_count,
-				REVISION_NAME,
-				timestamp,
-				date_text,
-				git_hash,
-				REPORT_HTML_PATH))
-			{
-				printf("Failed to write report HTML\n");
-				++failures;
+	fclose(csv_file);
+	free(targets);
 
-			}
-
-			if (!append_metrics_history_csv(
-				registry,
-				result_count,
-				REVISION_NAME,
-				timestamp,
-				date_text,
-				git_hash,
-				METRICS_CSV_PATH))
-			{
-				printf("Failed to append metrics history CSV\n");
-				++failures;
-
-			}
-
-		}
-		else
-		{
-			printf("Non-canon mode: artifact generation skipped.\n");
-
-		}
-
-	}
-	else
-	{
-		++failures;
-
-	}
-
-	printf("\nSUITE SUMMARY: processed=%d failed=%d\n", result_count, failures);
-	printf("Revision HTML: %s\n", REPORT_HTML_PATH);
-	printf("CSV Ledger: %s\n", METRICS_CSV_PATH);
+	printf("\nRAW RUN SUMMARY: processed=%d failed=%d\n", processed, failures);
+	printf("Raw CSV: %s\n", options.output_csv);
 	return (failures == 0) ? 0 : 1;
 
 }
-

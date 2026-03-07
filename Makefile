@@ -21,10 +21,11 @@ LDFLAGS        = -pthread
 # 3. TARGETS
 CORE_SRC       = core/engine.c core/loader.c core/primitives.c core/state_manager.c
 RUNNER_SRC     = benchmarks/runner.c
+METRIC_SRC     = benchmarks/metric_calculator.c
 TEST_SRC       = tests/test_runner.c
 
 # 4. BUILD RULES
-all: setup hebs_cli hebs_test
+all: setup hebs_cli hebs_metrics hebs_test
 
 # Setup using Windows 'cmd' syntax
 setup:
@@ -42,6 +43,10 @@ setup:
 hebs_cli:
 	$(CC) $(CFLAGS) $(CORE_SRC) $(RUNNER_SRC) -o $(BUILD_DIR)/hebs_cli $(LDFLAGS)
 
+# Compile the Metric Calculator
+hebs_metrics:
+	$(CC) $(CFLAGS) $(METRIC_SRC) -o $(BUILD_DIR)/hebs_metrics $(LDFLAGS)
+
 # Compile the Test Suite
 hebs_test:
 	$(CC) $(CFLAGS) $(CORE_SRC) $(TEST_SRC) -o $(BUILD_DIR)/hebs_test $(LDFLAGS)
@@ -54,4 +59,4 @@ clean:
 	@if exist $(BUILD_DIR) rd /s /q $(BUILD_DIR)
 	@echo HEBS_CLEAN: Build artifacts removed.
 
-.PHONY: all setup clean verify
+.PHONY: all setup clean verify hebs_cli hebs_metrics hebs_test

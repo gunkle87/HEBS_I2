@@ -1,127 +1,74 @@
 # Metric Derivation Technical Specification
 
 ## 1. Scope
-This document defines benchmark metric derivation implemented by tooling code.
-It reflects current implementation in `benchmarks/runner.c` and helper headers.
-It does not define engine internals.
+This document defines derived metric computation as a separate tooling step.
+The benchmark runner emits raw rows only.
+Derived metrics are computed by `benchmarks/metric_calculator.c`.
 
-Primary implementation source:
-- `benchmarks/runner.c`
-- `benchmarks/protocol_helper.h`
-- `benchmarks/report_types.h`
-- `benchmarks/csv_export.h`
+## 2. Inputs
+Calculator input is raw CSV produced by runner.
+Default input path:
+- `benchmarks/results/raw_runner_output.csv`
 
-## 2. Input Signals for Derivation
-Per benchmark row derives from:
-- runtime samples array of size `ITERATIONS`
-- GEPS samples array of size `ITERATIONS`
-- topology fields from loaded plan
-- probe counters captured from `hebs_get_probes`
-- cycle totals accumulated from `engine.current_tick`
-- history baselines from CSV lookup helpers
+Raw schema contract is defined in `benchmarks/BENCH_RUNNER_SPEC.md`.
 
-## 3. Statistical Metrics
-Implemented with helpers in `protocol_helper.h`:
-- `runtime_min = min(runtimes)`
-- `runtime_max = max(runtimes)`
-- `runtime_p50 = p50(runtimes)`
-- `runtime_p90 = percentile(runtimes, 90)`
-- `runtime_p95 = percentile(runtimes, 95)`
-- `runtime_p99 = percentile(runtimes, 99)`
-- `runtime_mean = mean(runtimes)`
-- `runtime_variance = variance(runtimes)`
-- `runtime_stddev = stddev(runtimes)`
+## 3. Output
+Calculator output is derived CSV.
+Default output path:
+- `benchmarks/results/metrics_derived.csv`
 
-GEPS statistics:
-- `geps_min = min(geps_runs)`
-- `geps_max = max(geps_runs)`
-- `geps_p50 = p50(geps_runs)`
-- `gates_per_second = geps_p50`
+One output row is emitted per `(run_id, suite, bench, mode)` group.
+Each row aggregates all iterations in that group.
 
-## 4. Transition Core Metric
-- `icf = calculate_icf(internal_transitions, primary_input_transitions)`
-- `calculate_icf(a, b)` returns `0` when denominator `b` is zero
+## 4. CLI Contract
+Supported arguments:
+- `--input <raw.csv>`
+- `--output <derived.csv>`
+- `--replace` (overwrite output instead of append)
 
-## 5. Execution Metrics
-Current implementation formulas:
-- `total_runtime = runtime_p50`
-- `throughput = cycles / runtime_p50` when runtime positive, else `0`
-- `latency_per_cycle = runtime_p50 / cycles` when cycles positive, else `0`
-- `latency_per_vector = latency_per_cycle`
-- `speedup = runtime_max / runtime_p50` when runtime positive, else `0`
-- `efficiency = runtime_p50 / runtime_max` when runtime_max positive, else `0`
+Default behavior appends to output and uses prior output rows as history baseline.
 
-## 6. Simulation and Activity Metrics
-Current implementation formulas:
-- `events_per_second = total_toggles / runtime_p50` when runtime positive, else `0`
-- `edges_per_second = events_per_second`
-- `vector_throughput = throughput`
-- `cycles_per_second = throughput`
-- `cycles_per_vector = 1.0`
-- `gates_per_cycle = gate_count` when cycles positive, else `0`
-- `events_per_cycle = total_toggles / cycles` when cycles positive, else `0`
-- `events_per_vector = events_per_cycle`
-- `net_transitions_per_cycle = events_per_cycle`
+## 5. Grouping and Ordering
+Rows are grouped by:
+- `run_id`
+- `suite`
+- `bench`
+- `mode`
 
-Fanout and activity:
-- `fanout_avg = total_fanout_edges / signal_count` when signal_count positive, else `0`
-- `fanout_activity = fanout_avg * events_per_cycle`
-- `toggle_rate = icf`
-- `activity_factor = icf`
-- `event_density = events_per_cycle / gate_count` when gate_count positive, else `0`
-- `work_per_event = gate_count / events_per_cycle` when events_per_cycle positive, else `0`
-- `evals_per_event = (gate_count * cycles) / total_toggles` when toggles positive, else `0`
+Groups are emitted in deterministic order by `(suite, bench, run_id, mode)`.
 
-Temporal and topological:
-- `simulated_time_per_second = cycles_per_second`
-- `wallclock_per_sim_cycle = latency_per_cycle`
-- `utilized_edges_ratio = event_density`
-- `queue_utilization = event_density`
-- `critical_path_eval_rate = propagation_depth / runtime_p50` when runtime positive, else `0`
-- `gate_density = gate_count / signal_count` when signal_count positive, else `0`
-- `transition_entropy = binary_entropy(activity_factor)`
+## 6. Derived Formulas
+Per raw row:
+- `geps = (gate_count * cycles) / runtime_sec / 1e9` when runtime > 0 else `0`
+- `icf = probe_state_change_commit / probe_input_toggle` when `probe_input_toggle > 0` else `0`
 
-`binary_entropy(p)` is `0` for `p <= 0` or `p >= 1`, else standard binary entropy.
+Per group (across iterations):
+- Runtime: `min`, `p50`, `p90`, `p95`, `p99`, `max`, `mean`, `stddev`
+- GEPS: `min`, `p50`, `max`, `mean`
+- ICF: `min`, `p50`, `max`, `mean`
 
-## 7. Profile-Gated Probe Inputs
-Transition counters are profile-dependent:
+Percentiles are linear interpolation over sorted samples.
+Variance/stddev use population form (`/N`).
 
-Compat profile enabled:
-- `total_toggles` populated from `probes.input_toggle`
-- `primary_input_transitions` populated from `probes.input_toggle`
-- `internal_transitions` populated from `probes.state_change_commit`
+## 7. History Baseline and Deltas
+When appending, calculator scans existing derived CSV for matching `(suite, bench, mode)`:
+- `base_*` is first seen value
+- `prev_*` is most recent seen value
 
-Perf profile enabled:
-- `total_toggles = 0`
-- `primary_input_transitions = 0`
-- `internal_transitions = 0`
+Delta formulas:
+- `delta_geps_prev_pct = ((geps_p50 - prev_geps_p50) / prev_geps_p50) * 100` when `prev_geps_p50 > 0` else `0`
+- `delta_icf_prev_pct = ((icf_p50 - prev_icf_p50) / prev_icf_p50) * 100` when `prev_icf_p50 > 0` else `0`
 
-These values directly affect ICF and activity-family metrics.
+## 8. Fingerprint Field
+`fingerprint_stable = 1` only when all iteration `logic_crc32` values in the group match.
+`logic_crc32` output is the first iteration CRC value for the group.
 
-## 8. History and Regression Fields
-History lookup:
-- base and previous GEPS/ICF are loaded from CSV via `lookup_history_for_bench_suite`
+## 9. Derived CSV Schema
+Header order:
 
-Anchor override:
-- for `Revision_Combinational_` rows, base GEPS may be overridden by anchor mean GEPS when anchor token data is available
+`run_id,revision,date,time,git_commit,suite,bench,mode,iterations,cycles,gate_count,pi_count,signal_count,propagation_depth,fanout_max,total_fanout_edges,runtime_min_sec,runtime_p50_sec,runtime_p90_sec,runtime_p95_sec,runtime_p99_sec,runtime_max_sec,runtime_mean_sec,runtime_stddev_sec,geps_min,geps_p50,geps_max,geps_mean,icf_min,icf_p50,icf_max,icf_mean,base_geps_p50,prev_geps_p50,delta_geps_prev_pct,base_icf_p50,prev_icf_p50,delta_icf_prev_pct,fingerprint_stable,logic_crc32,compat_metrics_enabled`
 
-Regression gate field:
-- `geps_delta_prev_pct = ((geps_p50 - prev_geps_p50) / prev_geps_p50) * 100`
-- `geps_regression_fail = 1` when delta is below `-2.0`
-
-## 9. Determinism Metadata
-`logic_fingerprint` is CRC32 over final signal tray state.
-`fingerprint_stable` is true only when all iteration CRC32 values match first iteration CRC32.
-
-## 10. Output Contract
-Derived values are persisted through:
-- HTML rendering via `generate_master_report`
-- CSV append via `append_metrics_history_csv`
-
-CSV output includes profile metadata columns:
-- `Probe_Profile`
-- `Compat_Metrics_Enabled`
-
-## 11. Change Control Guidance
-If formulas are changed in runner implementation, update this file in the same change.
-Keep formula names stable unless there is an approved naming change.
+## 10. Boundary Rules
+Calculator is non-canonical analysis tooling.
+It must not mutate engine internals.
+It must consume raw runner output only.
