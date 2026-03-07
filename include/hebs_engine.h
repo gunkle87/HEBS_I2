@@ -126,10 +126,8 @@ typedef struct hebs_probes_s
 {
 	uint64_t input_apply;
 	uint64_t input_toggle;
-	uint64_t tray_exec;
 	uint64_t chunk_exec;
 	uint64_t gate_eval;
-	uint64_t state_write_commit;
 	uint64_t state_change_commit;
 	uint64_t dff_exec;
 
@@ -148,10 +146,8 @@ typedef struct hebs_engine_s
 	uint64_t vectors_applied;
 	uint64_t probe_input_apply;
 	uint64_t probe_input_toggle;
-	uint64_t probe_tray_exec;
 	uint64_t probe_chunk_exec;
 	uint64_t probe_gate_eval;
-	uint64_t probe_state_write_commit;
 	uint64_t probe_state_change_commit;
 	uint64_t probe_dff_exec;
 

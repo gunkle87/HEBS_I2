@@ -153,9 +153,13 @@ REPO MAP MAINTENANCE:
       files, or directories are added, removed, renamed, or behaviorally changed.
 
 REVISION-BASED ARTIFACT NAMING:
-    - Generated report artifact names must use the active Revision token.
-    - HTML output for a major Revision must be append-only with filename pattern:
-      [RevisionName]_vNN.html, starting at v01.
+    - Benchmark and test artifact tokens must use flat minor format:
+      [RevisionName]_vNN.
+    - Generated benchmark HTML filename must be:
+      [RevisionToken].html.
+    - Compatibility benchmark runs use:
+      [RevisionToken]_compat and [RevisionToken]_compat.html.
+    - Nested naming forms (example: probe_fix_v05_v01) are non-canonical.
     - Existing HTML artifacts must never be overwritten or deleted by later runs.
     - The final minor code change in a Revision is the revision metrics-point update.
 
@@ -217,8 +221,7 @@ CANONICAL ARTIFACT SEPARATION:
 
 PROBE ACCEPTANCE THRESHOLDS:
     - Permanent profile retention requires:
-      <= 1.0% median GEPS regression on canonical benchmark suite and
-      <= 2.5% regression on any individual benchmark unless explicitly approved.
+      Human users acceptance.
 
 
 SRAM KEY TAKEAWAYS:

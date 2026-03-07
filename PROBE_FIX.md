@@ -3,6 +3,21 @@
 Status: Canon staging document for `probe_fix_v03` through `probe_fix_v05`
 Scope: Probe architecture hardening and performance protection
 
+## 0. Current Implementation Status (2026-03-07)
+
+Code-state status:
+- Implemented: probe profile lock (`PERF`/`COMPAT`) and derived `HEBS_COMPAT_PROBES_ENABLED`
+- Implemented: permanent/compat classification behavior for active probes
+- Implemented: removed `state_write_attempt`
+- Implemented: deferred probe exposure removed from active API/code paths (`tray_exec`, `state_write_commit`)
+- Implemented: benchmark profile metadata columns appended (`Probe_Profile`, `Compat_Metrics_Enabled`)
+- Implemented: canonical vs compatibility ledger separation (`metrics_history.csv` vs `metrics_history_compat.csv`)
+- Implemented: profile-split test expectations (perf does not require compat counters; compat may assert them)
+
+Process-verification note:
+- Section 10 commit/push order is a git-history requirement.
+- It is verified from commit/reflog history, not from source snapshot alone.
+
 ## 1. Scope
 
 `probe_fix_v03` is a narrow correction pass.
@@ -164,14 +179,7 @@ Baseline reference:
 - use the agreed perf-oriented baseline established before enabling compatibility probes for this run series
 
 ## 9. Acceptance Thresholds
-
-A probe may remain in the permanent perf profile only if its inclusion causes:
-- no more than 1.0% median GEPS regression on the canonical benchmark suite
-- no more than 2.5% regression on any individual benchmark unless explicitly approved
-
-If a probe exceeds these limits:
-- it must not remain in perf profile
-- it may only be compatibility-only or removed
+Probe acceptance is exclusively the determination of the human user.
 
 ## 10. Required v03-v05 Execution Order
 
@@ -198,6 +206,8 @@ If thresholds are not met after Run 3, further action requires a new approved sc
 
 Minor revision naming rule:
 - Use flat revision tokens only (`probe_fix_vNN`).
+- Benchmark HTML artifacts use token-as-stem naming (`probe_fix_vNN.html`).
+- Compatibility benchmark artifacts use `probe_fix_vNN_compat.html`.
 - Do not use nested suffix forms such as `probe_fix_v03_v01`.
 
 ## 11. Non-Goals

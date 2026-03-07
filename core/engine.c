@@ -91,8 +91,6 @@ static inline uint64_t hebs_commit_lane_write(
 #define HEBS_FLUSH_CHUNK_PROBES(ctx, writes, changes) \
 	do \
 	{ \
-		(ctx)->probe_state_write_commit += (uint64_t)(writes); \
-		(ctx)->probe_tray_exec += (uint64_t)(writes); \
 		(ctx)->probe_chunk_exec += 1U; \
 		(ctx)->probe_gate_eval += (uint64_t)(writes); \
 		if (HEBS_COMPAT_PROBES_ENABLED) \
@@ -705,8 +703,6 @@ static void hebs_execute_combinational_fallback(hebs_engine* ctx, const hebs_pla
 
 	ctx->probe_gate_eval += write_count;
 	ctx->probe_chunk_exec += write_count;
-	ctx->probe_state_write_commit += write_count;
-	ctx->probe_tray_exec += write_count;
 #if HEBS_COMPAT_PROBES_ENABLED
 	ctx->probe_state_change_commit += state_change_count;
 #endif
@@ -739,9 +735,7 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	ctx->vectors_applied = 0;
 	ctx->probe_input_apply = 0;
 	ctx->probe_input_toggle = 0;
-	ctx->probe_tray_exec = 0;
 	ctx->probe_chunk_exec = 0;
-	ctx->probe_state_write_commit = 0;
 	ctx->probe_state_change_commit = 0;
 	ctx->probe_dff_exec = 0;
 	ctx->probe_gate_eval = 0;
@@ -794,10 +788,8 @@ hebs_probes hebs_get_probes(const hebs_engine* ctx)
 
 	probes.input_apply = ctx->probe_input_apply;
 	probes.input_toggle = ctx->probe_input_toggle;
-	probes.tray_exec = ctx->probe_tray_exec;
 	probes.chunk_exec = ctx->probe_chunk_exec;
 	probes.gate_eval = ctx->probe_gate_eval;
-	probes.state_write_commit = ctx->probe_state_write_commit;
 	probes.state_change_commit = ctx->probe_state_change_commit;
 	probes.dff_exec = ctx->probe_dff_exec;
 	return probes;
