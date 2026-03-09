@@ -278,6 +278,42 @@ static uint8_t hebs_eval_gate_nibble(
 
 }
 
+static void hebs_execute_and_span(
+	hebs_engine* ctx,
+	const hebs_exec_instruction_t* exec_base,
+	uint32_t count)
+{
+	uint32_t local_idx;
+
+	for (local_idx = 0U; local_idx < count; ++local_idx)
+	{
+		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
+		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
+		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
+		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
+		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		const uint8_t out_l = (uint8_t)(a_l & b_l);
+		const uint8_t out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
+		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+
+	}
+
+}
+
 static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 {
 	uint32_t span_idx;
@@ -290,6 +326,13 @@ static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 
 		ctx->probe_chunk_exec += 1U;
 		ctx->probe_gate_eval += (uint64_t)span->count;
+
+		if (span->gate_type == HEBS_GATE_AND)
+		{
+			hebs_execute_and_span(ctx, exec_base, span->count);
+			continue;
+
+		}
 
 		for (local_idx = 0U; local_idx < span->count; ++local_idx)
 		{
