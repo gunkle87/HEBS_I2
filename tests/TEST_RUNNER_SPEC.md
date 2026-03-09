@@ -44,11 +44,32 @@ Exit behavior:
 `test_parallel_dff_tray_commit`
 - validates DFF commit behavior and state tray propagation path
 
+`test_loaded_dff_captures_declared_data_only`
+- validates loaded single-input DFF capture against the live engine contract
+
+`test_loaded_dff_unknown_capture_ignores_unrelated_state`
+- validates DFF unknown capture behavior stays isolated from unrelated tray state
+
+`test_loader_batched_specialized_span_execution`
+- validates loader-built batched execution across the specialized span-kernel path
+
 `test_protocol_helper_stats`
 - validates min/max/p50/percentile/stddev helper results
 
 `test_extended_primitive_suite`
-- validates scalar primitive helpers and selected SIMD helper behavior
+- validates scalar primitive helpers
+
+`test_init_rejects_oversized_signal_count`
+- validates engine initialization rejects plans that exceed fixed signal capacity
+
+`test_fallback_invalid_src_b_is_safely_skipped`
+- validates malformed fallback source bounds are skipped without execution
+
+`test_batched_invalid_src_b_is_safely_skipped`
+- validates malformed batched span source bounds are skipped without output writes
+
+`test_dff_invalid_destination_is_safely_skipped`
+- validates malformed DFF destination records are skipped without state corruption
 
 ## 6. Profile-Aware Assertions
 Tests include explicit profile-conditional assertions with `HEBS_TEST_PROBES`.

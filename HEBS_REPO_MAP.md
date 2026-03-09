@@ -122,57 +122,57 @@ Location: core/loader.c:1421
 hebs_init_engine
 Kind: function
 Use: initialize engine state from a plan and reset probes
-Location: core/engine.c:916
+Location: core/engine.c:1053
 
 hebs_tick
 Kind: function
 Use: execute one simulation tick with combinational evaluate, resolve, and inline single-input DFF commit phases
-Location: core/engine.c:1000
+Location: core/engine.c:1111
 
 hebs_get_probes
 Kind: function
 Use: return a raw probe snapshot from engine state
-Location: core/engine.c:995
+Location: core/engine.c:1134
 
 hebs_get_run_status
 Kind: function
 Use: return current engine run status facts without deriving metrics
-Location: core/engine.c:1018
+Location: core/engine.c:1157
 
 hebs_get_state_hash
 Kind: function
-Use: compute hash of current engine trays and tick
-Location: core/engine.c:1036
+Use: compute hash of current tick and current net_physical signal states
+Location: core/engine.c:1175
 
 hebs_get_final_crc32
 Kind: function
-Use: return crc32 fingerprint over current active signal trays
-Location: core/engine.c:1062
+Use: return crc32 fingerprint over current net_physical signal states
+Location: core/engine.c:1201
 
 hebs_get_plan_hash
 Kind: function
 Use: return immutable plan hash from a loaded plan
-Location: core/engine.c:1074
+Location: core/engine.c:1213
 
 hebs_get_plan_metadata
 Kind: function
 Use: copy static plan metadata facts into a snapshot struct
-Location: core/engine.c:1086
+Location: core/engine.c:1225
 
 hebs_set_primary_input
 Kind: function
 Use: apply primary input value to engine tray storage
-Location: core/engine.c:1112
+Location: core/engine.c:1251
 
 hebs_get_primary_input
 Kind: function
 Use: read primary input value from engine state
-Location: core/engine.c:1178
+Location: core/engine.c:1317
 
 hebs_get_signal_tray
 Kind: function
 Use: expose tray pointer for read access by tray index
-Location: core/engine.c:1191
+Location: core/engine.c:1330
 
 hebs_resolve_states
 Kind: function

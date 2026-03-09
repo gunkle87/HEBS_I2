@@ -204,23 +204,36 @@ static void hebs_execute_and_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t out_l = (uint8_t)(a_l & b_l);
-		const uint8_t out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		out_l = (uint8_t)(a_l & b_l);
+		out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -240,23 +253,36 @@ static void hebs_execute_or_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t out_l = (uint8_t)(a_l | b_l);
-		const uint8_t out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		out_l = (uint8_t)(a_l | b_l);
+		out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -276,23 +302,36 @@ static void hebs_execute_xor_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t out_l = (uint8_t)(a_l ^ b_l);
-		const uint8_t out_x = (uint8_t)(a_x | b_x);
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		out_l = (uint8_t)(a_l ^ b_l);
+		out_x = (uint8_t)(a_x | b_x);
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -312,24 +351,38 @@ static void hebs_execute_nand_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t tmp_l = (uint8_t)(a_l & b_l);
-		const uint8_t out_l = (uint8_t)(tmp_l ^ 1U);
-		const uint8_t out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t tmp_l;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		tmp_l = (uint8_t)(a_l & b_l);
+		out_l = (uint8_t)(tmp_l ^ 1U);
+		out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -349,24 +402,38 @@ static void hebs_execute_nor_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t tmp_l = (uint8_t)(a_l | b_l);
-		const uint8_t out_l = (uint8_t)(tmp_l ^ 1U);
-		const uint8_t out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t tmp_l;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		tmp_l = (uint8_t)(a_l | b_l);
+		out_l = (uint8_t)(tmp_l ^ 1U);
+		out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -386,22 +453,27 @@ static void hebs_execute_not_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t out_l = (uint8_t)(a_l ^ 1U);
-		const uint8_t out_x = a_x;
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		(void)src_b_tray;
+		uint64_t src_a_tray;
+		uint8_t src_a_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		out_l = (uint8_t)(a_l ^ 1U);
+		out_x = a_x;
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -421,22 +493,27 @@ static void hebs_execute_buf_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t out_l = a_l;
-		const uint8_t out_x = a_x;
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		(void)src_b_tray;
+		uint64_t src_a_tray;
+		uint8_t src_a_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		out_l = a_l;
+		out_x = a_x;
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -456,24 +533,38 @@ static void hebs_execute_xnor_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t tmp_l = (uint8_t)(a_l ^ b_l);
-		const uint8_t out_l = (uint8_t)(tmp_l ^ 1U);
-		const uint8_t out_x = (uint8_t)(a_x | b_x);
-		const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t tmp_l;
+		uint8_t out_l;
+		uint8_t out_x;
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		tmp_l = (uint8_t)(a_l ^ b_l);
+		out_l = (uint8_t)(tmp_l ^ 1U);
+		out_x = (uint8_t)(a_x | b_x);
+		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -492,15 +583,9 @@ static void hebs_execute_vcc_span(
 	{
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
-		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
 		const uint8_t drive_nibble = 0x8U;
 
-		(void)src_a_tray;
-		(void)src_b_tray;
-
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count)
 		{
 			continue;
 
@@ -523,15 +608,9 @@ static void hebs_execute_gnd_span(
 	{
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
-		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
 		const uint8_t drive_nibble = 0x4U;
 
-		(void)src_a_tray;
-		(void)src_b_tray;
-
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count)
 		{
 			continue;
 
@@ -555,19 +634,21 @@ static void hebs_execute_pup_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-
-		(void)src_b_tray;
+		uint64_t src_a_tray;
+		uint8_t src_a_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
 
 		{
 			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
@@ -594,19 +675,21 @@ static void hebs_execute_pdn_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-
-		(void)src_b_tray;
+		uint64_t src_a_tray;
+		uint8_t src_a_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
 
 		{
 			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
@@ -633,28 +716,45 @@ static void hebs_execute_tri_span(
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
 		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-		const uint8_t en_valid = (uint8_t)(b_x ^ 1U);
-		const uint8_t en_high = (uint8_t)(en_valid & b_l);
-		const uint8_t en_x = b_x;
-		const uint8_t m_high = (uint8_t)(0U - en_high);
-		const uint8_t m_x = (uint8_t)(0U - en_x);
-		const uint8_t data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
+		const uint32_t src_b_net_id = hebs_net_id_from_tray_shift(exec_instr->src_b_tray, exec_instr->src_b_shift);
+		uint64_t src_a_tray;
+		uint64_t src_b_tray;
+		uint8_t src_a_pstate;
+		uint8_t src_b_pstate;
+		uint8_t a_l;
+		uint8_t a_x;
+		uint8_t b_l;
+		uint8_t b_x;
+		uint8_t en_valid;
+		uint8_t en_high;
+		uint8_t en_x;
+		uint8_t m_high;
+		uint8_t m_x;
+		uint8_t data_drive;
 		const uint8_t x_drive = 0xCU;
-		const uint8_t drive_nibble = (uint8_t)((m_high & data_drive) | (m_x & x_drive));
+		uint8_t drive_nibble;
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
 			continue;
 
 		}
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		a_l = (uint8_t)(src_a_pstate & 1U);
+		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		b_l = (uint8_t)(src_b_pstate & 1U);
+		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		en_valid = (uint8_t)(b_x ^ 1U);
+		en_high = (uint8_t)(en_valid & b_l);
+		en_x = b_x;
+		m_high = (uint8_t)(0U - en_high);
+		m_x = (uint8_t)(0U - en_x);
+		data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
+		drive_nibble = (uint8_t)((m_high & data_drive) | (m_x & x_drive));
 
 		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
@@ -918,22 +1018,33 @@ static void hebs_phase_commit_dff(hebs_engine* ctx, const hebs_plan* plan)
 	for (instr_idx = 0U; instr_idx < plan->dff_exec_count; ++instr_idx)
 	{
 		const hebs_exec_instruction_t* const exec_instr = &plan->dff_exec_data[instr_idx];
-		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint8_t data_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t data_l = (uint8_t)(data_pstate & 1U);
-		const uint8_t data_x = (uint8_t)((data_pstate >> 1U) & 1U);
-		const uint8_t capture_x = data_x;
-		const uint8_t next_l = (uint8_t)(data_l & (uint8_t)(capture_x ^ 1U));
-		const uint8_t next_pstate = (uint8_t)(next_l | (uint8_t)(capture_x << 1U));
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+		uint64_t src_a_tray;
+		uint8_t data_pstate;
+		uint8_t data_l;
+		uint8_t data_x;
+		uint8_t capture_x;
+		uint8_t next_l;
+		uint8_t next_pstate;
 
-		hebs_write_pstate_to_trays(ctx->dff_state_trays, dst_net_id, next_pstate);
-		if (dst_net_id < ctx->net_count)
+		ctx->probe_dff_exec += 1U;
+
+		if (exec_instr->dst_tray >= ctx->tray_count || dst_net_id >= ctx->net_count)
 		{
-			hebs_mailbox_or(ctx, dst_net_id, hebs_make_drive_nibble(next_l, capture_x, 1U));
+			continue;
 
 		}
-		ctx->probe_dff_exec += 1U;
+
+		src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		data_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		data_l = (uint8_t)(data_pstate & 1U);
+		data_x = (uint8_t)((data_pstate >> 1U) & 1U);
+		capture_x = data_x;
+		next_l = (uint8_t)(data_l & (uint8_t)(capture_x ^ 1U));
+		next_pstate = (uint8_t)(next_l | (uint8_t)(capture_x << 1U));
+
+		hebs_write_pstate_to_trays(ctx->dff_state_trays, dst_net_id, next_pstate);
+		hebs_mailbox_or(ctx, dst_net_id, hebs_make_drive_nibble(next_l, capture_x, 1U));
 
 	}
 

@@ -1140,6 +1140,90 @@ static void test_fallback_invalid_src_b_is_safely_skipped(void)
 
 }
 
+static void test_batched_invalid_src_b_is_safely_skipped(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_exec_instruction_t comb_exec_data[1];
+	hebs_gate_span_t comb_spans[1];
+	hebs_plan plan = { 0 };
+	hebs_probes probes;
+
+	comb_exec_data[0].gate_type = (uint8_t)HEBS_GATE_OR;
+	comb_exec_data[0].src_a_shift = 0U;
+	comb_exec_data[0].src_b_shift = 0U;
+	comb_exec_data[0].dst_shift = 4U;
+	comb_exec_data[0].src_a_tray = 0U;
+	comb_exec_data[0].src_b_tray = 1U;
+	comb_exec_data[0].dst_tray = 0U;
+	comb_exec_data[0].dst_mask = 0ULL;
+
+	comb_spans[0].start = 0U;
+	comb_spans[0].count = 1U;
+	comb_spans[0].gate_type = (uint8_t)HEBS_GATE_OR;
+	comb_spans[0].reserved0 = 0U;
+	comb_spans[0].reserved1 = 0U;
+	comb_spans[0].reserved2 = 0U;
+
+	plan.lep_hash = 10012U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 3U;
+	plan.tray_count = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.comb_instruction_count = 1U;
+	plan.comb_exec_data = comb_exec_data;
+	plan.comb_span_count = 1U;
+	plan.comb_spans = comb_spans;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	probes = hebs_get_probes(&engine);
+
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x0U);
+	assert(probes.chunk_exec == 1U);
+	assert(probes.gate_eval == 1U);
+
+}
+
+static void test_dff_invalid_destination_is_safely_skipped(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_exec_instruction_t dff_exec_data[1];
+	hebs_plan plan = { 0 };
+	hebs_probes probes;
+	uint32_t crc_before;
+
+	dff_exec_data[0].gate_type = (uint8_t)HEBS_GATE_DFF;
+	dff_exec_data[0].src_a_shift = 0U;
+	dff_exec_data[0].src_b_shift = 0U;
+	dff_exec_data[0].dst_shift = 0U;
+	dff_exec_data[0].src_a_tray = 0U;
+	dff_exec_data[0].src_b_tray = 0U;
+	dff_exec_data[0].dst_tray = 1U;
+	dff_exec_data[0].dst_mask = 0ULL;
+
+	plan.lep_hash = 10013U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 1U;
+	plan.tray_count = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.dff_exec_count = 1U;
+	plan.dff_exec_data = dff_exec_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	crc_before = hebs_get_final_crc32(&engine);
+	hebs_tick(&engine, &plan);
+	probes = hebs_get_probes(&engine);
+
+	assert((uint8_t)read_signal_state(&engine, 0U) == 0x1U);
+	assert(hebs_get_final_crc32(&engine) == crc_before);
+	assert(probes.dff_exec == 1U);
+
+}
+
 int main(void)
 {
 	assert(HEBS_S1 == 1);
@@ -1167,6 +1251,8 @@ int main(void)
 	test_loader_batched_specialized_span_execution();
 	test_init_rejects_oversized_signal_count();
 	test_fallback_invalid_src_b_is_safely_skipped();
+	test_batched_invalid_src_b_is_safely_skipped();
+	test_dff_invalid_destination_is_safely_skipped();
 	return 0;
 
 }
