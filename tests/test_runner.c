@@ -374,6 +374,50 @@ static void test_multi_driver_phase1_or_not_overwrite(void)
 
 }
 
+static void test_duplicate_strong_drive_is_idempotent(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[0].input_count = 0U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(0U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[1].input_count = 0U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(0U);
+	lep_data[1].dst_bit_offset = net_to_bit(2U);
+
+	plan.lep_hash = 10041U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 3U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x1U);
+	assert(read_net_logic(&engine, 2U) == 1U);
+	assert(read_net_xflag(&engine, 2U) == 0U);
+
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x1U);
+	assert(read_net_logic(&engine, 2U) == 1U);
+	assert(read_net_xflag(&engine, 2U) == 0U);
+
+}
+
 static void test_full_net_contention_64plus(void)
 {
 	hebs_engine engine = { 0 };
@@ -1235,6 +1279,7 @@ int main(void)
 	test_or_nor_x_dominance();
 	test_tristate_disabled_is_zero_drive();
 	test_multi_driver_phase1_or_not_overwrite();
+	test_duplicate_strong_drive_is_idempotent();
 	test_full_net_contention_64plus();
 	test_dff_x_poison_chain_latency_10();
 	test_dirty_set_sparse_dense_saturation();

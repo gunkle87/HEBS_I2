@@ -61,28 +61,34 @@ static void hebs_write_pstate_net(hebs_engine* ctx, uint32_t net_id, uint8_t pst
 
 }
 
-static void hebs_mark_dirty(hebs_engine* ctx, uint32_t net_id)
-{
-	if (ctx->dirty_net_flags[net_id] == 0U)
-	{
-		ctx->dirty_net_flags[net_id] = 1U;
-		ctx->dirty_net_ids[ctx->dirty_count++] = net_id;
-
-	}
-
-}
-
 static void hebs_mailbox_or(hebs_engine* ctx, uint32_t net_id, uint8_t nibble)
 {
 	const uint8_t drive_nibble = (uint8_t)(nibble & 0x0FU);
+	const uint8_t old_mailbox = ctx->net_mailbox[net_id];
+	const uint8_t merged_mailbox = (uint8_t)(old_mailbox | drive_nibble);
+
 	if (drive_nibble == 0U)
 	{
 		return;
 
 	}
 
-	ctx->net_mailbox[net_id] = (uint8_t)(ctx->net_mailbox[net_id] | drive_nibble);
-	hebs_mark_dirty(ctx, net_id);
+	if (old_mailbox == 0U)
+	{
+		/* Mailbox zero is the first-touch invariant for dirty-list insertion. */
+		ctx->net_mailbox[net_id] = drive_nibble;
+		ctx->dirty_net_ids[ctx->dirty_count++] = net_id;
+		return;
+
+	}
+
+	if (merged_mailbox == old_mailbox)
+	{
+		return;
+
+	}
+
+	ctx->net_mailbox[net_id] = merged_mailbox;
 
 }
 
@@ -980,21 +986,23 @@ static void hebs_phase_evaluate(hebs_engine* ctx, const hebs_plan* plan)
 static void hebs_phase_resolve(hebs_engine* ctx)
 {
 	uint32_t dirty_idx;
+	uint8_t* const net_mailbox = ctx->net_mailbox;
+	uint8_t* const net_physical = ctx->net_physical;
 
 	for (dirty_idx = 0U; dirty_idx < ctx->dirty_count; ++dirty_idx)
 	{
 		const uint32_t net_id = ctx->dirty_net_ids[dirty_idx];
-		const uint8_t lut_value = HEBS_FUSED_LUT[ctx->net_mailbox[net_id] & 0x0FU];
+		const uint8_t old_mailbox = net_mailbox[net_id];
+		const uint8_t lut_value = HEBS_FUSED_LUT[old_mailbox];
 		const uint8_t resolved_3bn = (uint8_t)(lut_value & 0x07U);
 		const uint8_t next_pstate = (uint8_t)((lut_value >> 5U) & 0x03U);
 #if HEBS_TEST_PROBES
-		const uint8_t old_value = ctx->net_physical[net_id];
+		const uint8_t old_value = net_physical[net_id];
 #endif
 
-		ctx->net_physical[net_id] = resolved_3bn;
+		net_physical[net_id] = resolved_3bn;
 		hebs_write_pstate_net(ctx, net_id, next_pstate);
-		ctx->net_mailbox[net_id] = 0U;
-		ctx->dirty_net_flags[net_id] = 0U;
+		net_mailbox[net_id] = 0U;
 #if HEBS_TEST_PROBES
 		ctx->probe_state_change_commit += (uint64_t)(old_value != resolved_3bn);
 #endif
