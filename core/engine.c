@@ -192,92 +192,6 @@ static uint32_t hebs_crc32_bytes(const uint8_t* data, size_t len)
 
 }
 
-static uint8_t hebs_eval_gate_nibble(
-	const hebs_engine* ctx,
-	hebs_gate_type_t gate_type,
-	uint8_t src_a_pstate,
-	uint8_t src_b_pstate,
-	uint32_t src_a_net_id)
-{
-	const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-	const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-	const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-	const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
-
-	uint8_t out_l = 0U;
-	uint8_t out_x = 0U;
-
-	switch (gate_type)
-	{
-		case HEBS_GATE_AND:
-			out_l = (uint8_t)(a_l & b_l);
-			out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_OR:
-			out_l = (uint8_t)(a_l | b_l);
-			out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_XOR:
-			out_l = (uint8_t)(a_l ^ b_l);
-			out_x = (uint8_t)(a_x | b_x);
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_NOT:
-			out_l = (uint8_t)(a_l ^ 1U);
-			out_x = a_x;
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_NAND:
-			out_l = (uint8_t)(a_l & b_l);
-			out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
-			out_l = (uint8_t)(out_l ^ 1U);
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_NOR:
-			out_l = (uint8_t)(a_l | b_l);
-			out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
-			out_l = (uint8_t)(out_l ^ 1U);
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_XNOR:
-			out_l = (uint8_t)(a_l ^ b_l);
-			out_x = (uint8_t)(a_x | b_x);
-			out_l = (uint8_t)(out_l ^ 1U);
-			return hebs_make_drive_nibble(out_l, out_x, 1U);
-		case HEBS_GATE_BUF:
-			return hebs_make_drive_nibble(a_l, a_x, 1U);
-		case HEBS_GATE_TRI:
-		{
-			const uint8_t en_valid = (uint8_t)(b_x ^ 1U);
-			const uint8_t en_high = (uint8_t)(en_valid & b_l);
-			const uint8_t en_x = b_x;
-			const uint8_t m_high = (uint8_t)(0U - en_high);
-			const uint8_t m_x = (uint8_t)(0U - en_x);
-			const uint8_t data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
-			const uint8_t x_drive = 0xCU;
-			return (uint8_t)((m_high & data_drive) | (m_x & x_drive));
-		}
-		case HEBS_GATE_VCC:
-			return 0x8U;
-		case HEBS_GATE_GND:
-			return 0x4U;
-		case HEBS_GATE_PUP:
-		{
-			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
-			out_x = a_x;
-			out_l = (uint8_t)((a_l | src_is_z) & (uint8_t)(a_x ^ 1U));
-			return hebs_make_drive_nibble(out_l, out_x, 0U);
-		}
-		case HEBS_GATE_PDN:
-		{
-			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
-			out_x = a_x;
-			out_l = (uint8_t)((a_l & (uint8_t)(src_is_z ^ 1U)) & (uint8_t)(a_x ^ 1U));
-			return hebs_make_drive_nibble(out_l, out_x, 0U);
-		}
-		default:
-			return 0xCU;
-
-	}
-
-}
-
 static void hebs_execute_and_span(
 	hebs_engine* ctx,
 	const hebs_exec_instruction_t* exec_base,
@@ -756,122 +670,53 @@ static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 	{
 		const hebs_gate_span_t* const span = &plan->comb_spans[span_idx];
 		const hebs_exec_instruction_t* const exec_base = &plan->comb_exec_data[span->start];
-		uint32_t local_idx;
 
 		ctx->probe_chunk_exec += 1U;
 		ctx->probe_gate_eval += (uint64_t)span->count;
 
-		if (span->gate_type == HEBS_GATE_AND)
+		switch ((hebs_gate_type_t)span->gate_type)
 		{
-			hebs_execute_and_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_OR)
-		{
-			hebs_execute_or_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_XOR)
-		{
-			hebs_execute_xor_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_NAND)
-		{
-			hebs_execute_nand_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_NOR)
-		{
-			hebs_execute_nor_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_NOT)
-		{
-			hebs_execute_not_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_BUF)
-		{
-			hebs_execute_buf_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_XNOR)
-		{
-			hebs_execute_xnor_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_VCC)
-		{
-			hebs_execute_vcc_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_GND)
-		{
-			hebs_execute_gnd_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_PUP)
-		{
-			hebs_execute_pup_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_PDN)
-		{
-			hebs_execute_pdn_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		if (span->gate_type == HEBS_GATE_TRI)
-		{
-			hebs_execute_tri_span(ctx, exec_base, span->count);
-			continue;
-
-		}
-
-		for (local_idx = 0U; local_idx < span->count; ++local_idx)
-		{
-			const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
-			const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
-			const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
-			const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-			const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
-			const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-			const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
-
-			if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
-			{
-				continue;
-
-			}
-
-			hebs_mailbox_or(
-				ctx,
-				dst_net_id,
-				hebs_eval_gate_nibble(ctx, (hebs_gate_type_t)exec_instr->gate_type, src_a_pstate, src_b_pstate, src_a_net_id));
+			case HEBS_GATE_AND:
+				hebs_execute_and_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_OR:
+				hebs_execute_or_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_XOR:
+				hebs_execute_xor_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_XNOR:
+				hebs_execute_xnor_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_NAND:
+				hebs_execute_nand_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_NOR:
+				hebs_execute_nor_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_NOT:
+				hebs_execute_not_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_BUF:
+				hebs_execute_buf_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_VCC:
+				hebs_execute_vcc_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_GND:
+				hebs_execute_gnd_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_PUP:
+				hebs_execute_pup_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_PDN:
+				hebs_execute_pdn_span(ctx, exec_base, span->count);
+				break;
+			case HEBS_GATE_TRI:
+				hebs_execute_tri_span(ctx, exec_base, span->count);
+				break;
+			default:
+				break;
 
 		}
 
@@ -891,6 +736,11 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 		const uint32_t src_b_net_id = instr->src_b_bit_offset >> 1U;
 		const uint8_t src_a_pstate = hebs_read_pstate_net(ctx, src_a_net_id);
 		const uint8_t src_b_pstate = hebs_read_pstate_net(ctx, src_b_net_id);
+		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
+		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
+		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		uint8_t drive_nibble = 0xCU;
 
 		if ((hebs_gate_type_t)instr->gate_type == HEBS_GATE_DFF)
 		{
@@ -906,10 +756,80 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 
 		ctx->probe_chunk_exec += 1U;
 		ctx->probe_gate_eval += 1U;
-		hebs_mailbox_or(
-			ctx,
-			dst_net_id,
-			hebs_eval_gate_nibble(ctx, (hebs_gate_type_t)instr->gate_type, src_a_pstate, src_b_pstate, src_a_net_id));
+		switch ((hebs_gate_type_t)instr->gate_type)
+		{
+			case HEBS_GATE_AND:
+				drive_nibble = hebs_make_drive_nibble(
+					(uint8_t)(a_l & b_l),
+					(uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l)),
+					1U);
+				break;
+			case HEBS_GATE_OR:
+				drive_nibble = hebs_make_drive_nibble(
+					(uint8_t)(a_l | b_l),
+					(uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U)),
+					1U);
+				break;
+			case HEBS_GATE_XOR:
+				drive_nibble = hebs_make_drive_nibble((uint8_t)(a_l ^ b_l), (uint8_t)(a_x | b_x), 1U);
+				break;
+			case HEBS_GATE_NOT:
+				drive_nibble = hebs_make_drive_nibble((uint8_t)(a_l ^ 1U), a_x, 1U);
+				break;
+			case HEBS_GATE_NAND:
+				drive_nibble = hebs_make_drive_nibble(
+					(uint8_t)((a_l & b_l) ^ 1U),
+					(uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l)),
+					1U);
+				break;
+			case HEBS_GATE_NOR:
+				drive_nibble = hebs_make_drive_nibble(
+					(uint8_t)((a_l | b_l) ^ 1U),
+					(uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U)),
+					1U);
+				break;
+			case HEBS_GATE_XNOR:
+				drive_nibble = hebs_make_drive_nibble((uint8_t)((a_l ^ b_l) ^ 1U), (uint8_t)(a_x | b_x), 1U);
+				break;
+			case HEBS_GATE_BUF:
+				drive_nibble = hebs_make_drive_nibble(a_l, a_x, 1U);
+				break;
+			case HEBS_GATE_TRI:
+			{
+				const uint8_t en_valid = (uint8_t)(b_x ^ 1U);
+				const uint8_t en_high = (uint8_t)(en_valid & b_l);
+				const uint8_t en_x = b_x;
+				const uint8_t m_high = (uint8_t)(0U - en_high);
+				const uint8_t m_x = (uint8_t)(0U - en_x);
+				const uint8_t data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
+				drive_nibble = (uint8_t)((m_high & data_drive) | (m_x & 0xCU));
+				break;
+			}
+			case HEBS_GATE_VCC:
+				drive_nibble = 0x8U;
+				break;
+			case HEBS_GATE_GND:
+				drive_nibble = 0x4U;
+				break;
+			case HEBS_GATE_PUP:
+				drive_nibble = hebs_make_drive_nibble(
+					(uint8_t)((a_l | (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z)) & (uint8_t)(a_x ^ 1U)),
+					a_x,
+					0U);
+				break;
+			case HEBS_GATE_PDN:
+				drive_nibble = hebs_make_drive_nibble(
+					(uint8_t)((a_l & (uint8_t)(((uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z)) ^ 1U)) & (uint8_t)(a_x ^ 1U)),
+					a_x,
+					0U);
+				break;
+			default:
+				drive_nibble = 0xCU;
+				break;
+
+		}
+
+		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
 
 	}
 
