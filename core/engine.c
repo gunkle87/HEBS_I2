@@ -598,6 +598,37 @@ static void hebs_execute_vcc_span(
 
 }
 
+static void hebs_execute_gnd_span(
+	hebs_engine* ctx,
+	const hebs_exec_instruction_t* exec_base,
+	uint32_t count)
+{
+	uint32_t local_idx;
+
+	for (local_idx = 0U; local_idx < count; ++local_idx)
+	{
+		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
+		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
+		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		const uint8_t drive_nibble = 0x4U;
+
+		(void)src_a_tray;
+		(void)src_b_tray;
+
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+
+	}
+
+}
+
 static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 {
 	uint32_t span_idx;
@@ -670,6 +701,13 @@ static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 		if (span->gate_type == HEBS_GATE_VCC)
 		{
 			hebs_execute_vcc_span(ctx, exec_base, span->count);
+			continue;
+
+		}
+
+		if (span->gate_type == HEBS_GATE_GND)
+		{
+			hebs_execute_gnd_span(ctx, exec_base, span->count);
 			continue;
 
 		}
