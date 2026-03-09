@@ -25,7 +25,7 @@ Defaults can be overridden at compile time.
 - `TRACE_CSV_PATH` default `benchmarks/results/trace_cycle.csv`
 - `REVISION_NAME` default `Raw_Runner_v01`
 
-Probe profile label is selected by `HEBS_COMPAT_PROBES_ENABLED`.
+Probe profile label is selected by `HEBS_TEST_PROBES`.
 
 ## 4. CLI Contract
 Supported arguments:

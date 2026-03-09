@@ -1,0 +1,2 @@
+run_id,revision,date,time,git_commit,suite,bench,mode,iteration,iterations_total,cycles,runtime_sec,plan_fingerprint,logic_crc32,probe_input_apply,probe_input_toggle,probe_chunk_exec,probe_gate_eval,probe_state_change_commit,probe_dff_exec,pi_count,gate_count,signal_count,propagation_depth,fanout_max,total_fanout_edges,compat_metrics_enabled
+Raw_Runner_v01|2026-03-09|08:59:16|09b3bce|test,Raw_Runner_v01,2026-03-09,08:59:16,09b3bce,ISCAS89,s27.bench,test,1,1,1,0.000001200,0xE73F5ED1CA1B3DC5,0x5D2B2449,4,4,9,10,10,3,4,13,17,6,3,21,1

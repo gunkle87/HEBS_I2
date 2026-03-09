@@ -71,7 +71,7 @@ typedef struct hebs_metric_row_s
 	double icf_delta_prev_pct;
 	uint8_t geps_regression_fail;
 	char probe_profile[16];
-	uint8_t compat_metrics_enabled;
+	uint8_t test_probes_enabled;
 
 } hebs_metric_row_t;
 

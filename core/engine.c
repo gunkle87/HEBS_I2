@@ -1,72 +1,165 @@
 #include "hebs_engine.h"
 #include <string.h>
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-#include "primitives.h"
-#include "state_manager.h"
 
-static hebs_logic_t hebs_read_logic_at_offset(const uint64_t* trays, uint32_t tray_count, uint32_t bit_offset)
+#define HEBS_STATE_Z 0U
+#define HEBS_STATE_S1 1U
+#define HEBS_STATE_S0 2U
+#define HEBS_STATE_X 3U
+#define HEBS_STATE_W1 4U
+#define HEBS_STATE_W0 5U
+#define HEBS_STATE_WX 6U
+#define HEBS_STATE_SX 7U
+
+/* Index (4Bi): [SH, SL, WH, WL]
+   Packing: bit6=X, bit5=Logic, bits2:0=3Bn */
+static const uint8_t HEBS_FUSED_LUT[16] =
 {
-	uint32_t tray_index;
-	uint32_t bit_position;
+	0x00U, 0x05U, 0x24U, 0x46U,
+	0x02U, 0x02U, 0x02U, 0x02U,
+	0x21U, 0x21U, 0x21U, 0x21U,
+	0x47U, 0x47U, 0x47U, 0x47U
+};
 
-	if (!trays)
-	{
-		return HEBS_S0;
-
-	}
-
-	tray_index = bit_offset / 64U;
-	bit_position = bit_offset % 64U;
-	if (tray_index >= tray_count)
-	{
-		return HEBS_S0;
-
-	}
-
-	return (hebs_logic_t)((trays[tray_index] >> bit_position) & 0x3U);
+static uint32_t hebs_net_id_from_tray_shift(uint32_t tray_idx, uint8_t tray_shift)
+{
+	return (tray_idx * 32U) + ((uint32_t)tray_shift >> 1U);
 
 }
 
-static void hebs_write_logic_at_offset(uint64_t* trays, uint32_t tray_count, uint32_t bit_offset, hebs_logic_t value)
+static uint8_t hebs_read_pstate_from_word(uint64_t tray_word, uint8_t tray_shift)
 {
-	uint32_t tray_index;
-	uint32_t bit_position;
-	uint64_t mask;
-
-	if (!trays)
-	{
-		return;
-
-	}
-
-	tray_index = bit_offset / 64U;
-	bit_position = bit_offset % 64U;
-	if (tray_index >= tray_count)
-	{
-		return;
-
-	}
-
-	mask = ~(0x3ULL << bit_position);
-	trays[tray_index] = (trays[tray_index] & mask) | (((uint64_t)value & 0x3ULL) << bit_position);
+	return (uint8_t)((tray_word >> tray_shift) & 0x3ULL);
 
 }
 
-static void hebs_swap_active_trays(hebs_engine* ctx)
+static uint8_t hebs_read_pstate_net(const hebs_engine* ctx, uint32_t net_id)
 {
-	uint64_t* swap;
+	const uint32_t tray_idx = net_id >> 5U;
+	const uint32_t tray_shift = (net_id & 31U) << 1U;
+	return (uint8_t)((ctx->signal_trays[tray_idx] >> tray_shift) & 0x3ULL);
 
-	if (!ctx)
+}
+
+static void hebs_write_pstate_to_trays(uint64_t* trays, uint32_t net_id, uint8_t pstate)
+{
+	const uint32_t tray_idx = net_id >> 5U;
+	const uint32_t tray_shift = (net_id & 31U) << 1U;
+	const uint64_t mask = ~(0x3ULL << tray_shift);
+	const uint64_t value = ((uint64_t)(pstate & 0x3U)) << tray_shift;
+	trays[tray_idx] = (trays[tray_idx] & mask) | value;
+
+}
+
+static void hebs_write_pstate_net(hebs_engine* ctx, uint32_t net_id, uint8_t pstate)
+{
+	hebs_write_pstate_to_trays(ctx->signal_trays, net_id, pstate);
+	if (ctx->next_signal_trays && ctx->next_signal_trays != ctx->signal_trays)
+	{
+		hebs_write_pstate_to_trays(ctx->next_signal_trays, net_id, pstate);
+
+	}
+
+}
+
+static void hebs_mark_dirty(hebs_engine* ctx, uint32_t net_id)
+{
+	if (ctx->dirty_net_flags[net_id] == 0U)
+	{
+		ctx->dirty_net_flags[net_id] = 1U;
+		ctx->dirty_net_ids[ctx->dirty_count++] = net_id;
+
+	}
+
+}
+
+static void hebs_mailbox_or(hebs_engine* ctx, uint32_t net_id, uint8_t nibble)
+{
+	const uint8_t drive_nibble = (uint8_t)(nibble & 0x0FU);
+	if (drive_nibble == 0U)
 	{
 		return;
 
 	}
 
-	swap = ctx->signal_trays;
-	ctx->signal_trays = ctx->next_signal_trays;
-	ctx->next_signal_trays = swap;
+	ctx->net_mailbox[net_id] = (uint8_t)(ctx->net_mailbox[net_id] | drive_nibble);
+	hebs_mark_dirty(ctx, net_id);
+
+}
+
+static uint8_t hebs_make_drive_nibble(uint8_t logic_bit, uint8_t x_flag, uint8_t strong_drive)
+{
+	const uint8_t logic = (uint8_t)(logic_bit & 1U);
+	const uint8_t x = (uint8_t)(x_flag & 1U);
+	const uint8_t strong = (uint8_t)(strong_drive & 1U);
+	const uint8_t base = (uint8_t)(1U + (strong * 3U));
+	const uint8_t high = (uint8_t)(base << 1U);
+	const uint8_t x_mix = (uint8_t)(base | high);
+	const uint8_t value_mix = (uint8_t)(base + (logic * base));
+	return (uint8_t)((x * x_mix) + ((1U - x) * value_mix));
+
+}
+
+static uint8_t hebs_logic_to_physical(hebs_logic_t value)
+{
+	switch (value)
+	{
+		case HEBS_Z:
+			return HEBS_STATE_Z;
+		case HEBS_S1:
+			return HEBS_STATE_S1;
+		case HEBS_S0:
+			return HEBS_STATE_S0;
+		case HEBS_X:
+			return HEBS_STATE_X;
+		case HEBS_W1:
+			return HEBS_STATE_W1;
+		case HEBS_W0:
+			return HEBS_STATE_W0;
+		case HEBS_WX:
+			return HEBS_STATE_WX;
+		case HEBS_SX:
+		default:
+			return HEBS_STATE_SX;
+
+	}
+
+}
+
+static hebs_logic_t hebs_physical_to_logic(uint8_t state_3bn)
+{
+	static const hebs_logic_t PHYSICAL_TO_LOGIC_LUT[8] =
+	{
+		HEBS_Z,
+		HEBS_S1,
+		HEBS_S0,
+		HEBS_X,
+		HEBS_W1,
+		HEBS_W0,
+		HEBS_WX,
+		HEBS_SX
+	};
+	return PHYSICAL_TO_LOGIC_LUT[state_3bn & 0x7U];
+
+}
+
+static uint8_t hebs_physical_to_pstate(uint8_t state_3bn)
+{
+	switch (state_3bn & 0x7U)
+	{
+		case HEBS_STATE_S1:
+		case HEBS_STATE_W1:
+			return 0x1U;
+		case HEBS_STATE_X:
+		case HEBS_STATE_WX:
+		case HEBS_STATE_SX:
+			return 0x2U;
+		case HEBS_STATE_Z:
+		case HEBS_STATE_S0:
+		case HEBS_STATE_W0:
+		default:
+			return 0x0U;
+
+	}
 
 }
 
@@ -88,7 +181,7 @@ static uint32_t hebs_crc32_bytes(const uint8_t* data, size_t len)
 		crc ^= (uint32_t)data[idx];
 		for (bit = 0; bit < 8; ++bit)
 		{
-			uint32_t mask = (uint32_t)(-(int)(crc & 1U));
+			const uint32_t mask = (uint32_t)(-(int)(crc & 1U));
 			crc = (crc >> 1U) ^ (0xEDB88320U & mask);
 
 		}
@@ -99,577 +192,125 @@ static uint32_t hebs_crc32_bytes(const uint8_t* data, size_t len)
 
 }
 
-#define HEBS_LANE_LUT_INDEX(a, b) ((((uint32_t)(a) & 0x3U) << 2U) | ((uint32_t)(b) & 0x3U))
-
-/* 2-bit lane LUTs preserve current packed-lane gate behavior while reducing hot-loop decode math. */
-static const uint8_t HEBS_LUT_AND_2B[16] =
+static uint8_t hebs_eval_gate_nibble(
+	const hebs_engine* ctx,
+	hebs_gate_type_t gate_type,
+	uint8_t src_a_pstate,
+	uint8_t src_b_pstate,
+	uint32_t src_a_net_id)
 {
-	0U, 0U, 2U, 2U, 0U, 1U, 2U, 3U, 2U, 2U, 2U, 2U, 2U, 3U, 2U, 3U
-};
+	const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
+	const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+	const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
+	const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
 
-static const uint8_t HEBS_LUT_OR_2B[16] =
-{
-	0U, 1U, 0U, 1U, 1U, 1U, 1U, 1U, 0U, 1U, 2U, 3U, 1U, 1U, 3U, 3U
-};
+	uint8_t out_l = 0U;
+	uint8_t out_x = 0U;
 
-static const uint8_t HEBS_LUT_XOR_2B[16] =
-{
-	0U, 1U, 2U, 3U, 1U, 0U, 3U, 2U, 2U, 3U, 2U, 3U, 3U, 2U, 3U, 2U
-};
+	switch (gate_type)
+	{
+		case HEBS_GATE_AND:
+			out_l = (uint8_t)(a_l & b_l);
+			out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_OR:
+			out_l = (uint8_t)(a_l | b_l);
+			out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_XOR:
+			out_l = (uint8_t)(a_l ^ b_l);
+			out_x = (uint8_t)(a_x | b_x);
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_NOT:
+			out_l = (uint8_t)(a_l ^ 1U);
+			out_x = a_x;
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_NAND:
+			out_l = (uint8_t)(a_l & b_l);
+			out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
+			out_l = (uint8_t)(out_l ^ 1U);
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_NOR:
+			out_l = (uint8_t)(a_l | b_l);
+			out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
+			out_l = (uint8_t)(out_l ^ 1U);
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_XNOR:
+			out_l = (uint8_t)(a_l ^ b_l);
+			out_x = (uint8_t)(a_x | b_x);
+			out_l = (uint8_t)(out_l ^ 1U);
+			return hebs_make_drive_nibble(out_l, out_x, 1U);
+		case HEBS_GATE_BUF:
+			return hebs_make_drive_nibble(a_l, a_x, 1U);
+		case HEBS_GATE_TRI:
+		{
+			const uint8_t en_valid = (uint8_t)(b_x ^ 1U);
+			const uint8_t en_high = (uint8_t)(en_valid & b_l);
+			const uint8_t en_x = b_x;
+			const uint8_t m_high = (uint8_t)(0U - en_high);
+			const uint8_t m_x = (uint8_t)(0U - en_x);
+			const uint8_t data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
+			const uint8_t x_drive = 0xCU;
+			return (uint8_t)((m_high & data_drive) | (m_x & x_drive));
+		}
+		case HEBS_GATE_VCC:
+			return 0x8U;
+		case HEBS_GATE_GND:
+			return 0x4U;
+		case HEBS_GATE_PUP:
+		{
+			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
+			out_x = a_x;
+			out_l = (uint8_t)((a_l | src_is_z) & (uint8_t)(a_x ^ 1U));
+			return hebs_make_drive_nibble(out_l, out_x, 0U);
+		}
+		case HEBS_GATE_PDN:
+		{
+			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
+			out_x = a_x;
+			out_l = (uint8_t)((a_l & (uint8_t)(src_is_z ^ 1U)) & (uint8_t)(a_x ^ 1U));
+			return hebs_make_drive_nibble(out_l, out_x, 0U);
+		}
+		default:
+			return 0xCU;
 
-static const uint8_t HEBS_LUT_NAND_2B[16] =
-{
-	1U, 1U, 3U, 3U, 1U, 0U, 3U, 2U, 3U, 3U, 3U, 3U, 3U, 2U, 3U, 2U
-};
-
-static const uint8_t HEBS_LUT_NOR_2B[16] =
-{
-	1U, 0U, 1U, 0U, 0U, 0U, 0U, 0U, 1U, 0U, 3U, 2U, 0U, 0U, 2U, 2U
-};
-
-static const uint8_t HEBS_LUT_XNOR_2B[16] =
-{
-	1U, 0U, 3U, 2U, 0U, 1U, 2U, 3U, 3U, 2U, 3U, 2U, 2U, 3U, 2U, 3U
-};
-
-static const uint8_t HEBS_LUT_TRI_2B[16] =
-{
-	0U, 0U, 0U, 0U, 0U, 1U, 0U, 1U, 0U, 2U, 0U, 2U, 0U, 3U, 0U, 3U
-};
-
-static const uint8_t HEBS_LUT_NOT_2B[4] = { 1U, 0U, 3U, 2U };
-static const uint8_t HEBS_LUT_BUF_2B[4] = { 0U, 1U, 2U, 3U };
-static const uint8_t HEBS_LUT_PUP_2B[4] = { 1U, 1U, 3U, 3U };
-static const uint8_t HEBS_LUT_PDN_2B[4] = { 0U, 0U, 2U, 2U };
-static const uint8_t HEBS_LUT_VCC_2B = 1U;
-static const uint8_t HEBS_LUT_GND_2B = 0U;
-
-static inline uint64_t hebs_commit_lane_write(
-	uint64_t* trays,
-	const hebs_exec_instruction_t* exec_instr,
-	uint64_t out_lane)
-{
-	const uint64_t shifted_lane = (out_lane & 0x3ULL) << exec_instr->dst_shift;
-	const uint64_t old_value = trays[exec_instr->dst_tray];
-	const uint64_t new_value = (old_value & ~exec_instr->dst_mask) | shifted_lane;
-
-	trays[exec_instr->dst_tray] = new_value;
-#if HEBS_COMPAT_PROBES_ENABLED
-	return (uint64_t)(new_value != old_value);
-#else
-	return 0U;
-#endif
+	}
 
 }
 
-#define HEBS_FLUSH_CHUNK_PROBES(ctx, writes, changes) \
-	do \
-	{ \
-		(ctx)->probe_chunk_exec += 1U; \
-		(ctx)->probe_gate_eval += (uint64_t)(writes); \
-		if (HEBS_COMPAT_PROBES_ENABLED) \
-		{ \
-			(ctx)->probe_state_change_commit += (changes); \
-		} \
-	} while (0)
-
-static void hebs_execute_and_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_AND_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_or_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_OR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_not_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_NOT_2B[(uint32_t)a_lane & 0x3U];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_nand_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_NAND_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_nor_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_NOR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_buf_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_BUF_2B[(uint32_t)a_lane & 0x3U];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_xor_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_XOR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_xnor_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t b_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_XNOR_2B[HEBS_LANE_LUT_INDEX(a_lane, b_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_tri_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t data_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t enable_lane = (trays[exec_instr->src_b_tray] >> exec_instr->src_b_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_TRI_2B[HEBS_LANE_LUT_INDEX(data_lane, enable_lane)];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_vcc_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_VCC_2B;
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_gnd_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_GND_2B;
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_pup_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_PUP_2B[(uint32_t)a_lane & 0x3U];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_pdn_chunk(
-	hebs_engine* ctx,
-	const hebs_plan* plan,
-	uint32_t chunk_start,
-	uint32_t chunk_count )
-{
-	uint32_t idx;
-	const hebs_exec_instruction_t* exec_base;
-	uint64_t* trays;
-	uint64_t state_change_count = 0U;
-
-	if (chunk_count == 0U)
-	{
-		return;
-
-	}
-
-	exec_base = &plan->comb_exec_data[chunk_start];
-	trays = ctx->next_signal_trays;
-
-#pragma GCC unroll 4
-	for (idx = 0U; idx < chunk_count; ++idx)
-	{
-		const hebs_exec_instruction_t* exec_instr = &exec_base[idx];
-		const uint64_t a_lane = (trays[exec_instr->src_a_tray] >> exec_instr->src_a_shift) & 0x3ULL;
-		const uint64_t out_lane = (uint64_t)HEBS_LUT_PDN_2B[(uint32_t)a_lane & 0x3U];
-		state_change_count += hebs_commit_lane_write(trays, exec_instr, out_lane);
-
-	}
-
-	HEBS_FLUSH_CHUNK_PROBES(ctx, chunk_count, state_change_count);
-
-}
-
-static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan* plan)
+static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 {
 	uint32_t span_idx;
 
 	for (span_idx = 0U; span_idx < plan->comb_span_count; ++span_idx)
 	{
-		const hebs_gate_span_t* span = &plan->comb_spans[span_idx];
-		switch ((hebs_gate_type_t)span->gate_type)
+		const hebs_gate_span_t* const span = &plan->comb_spans[span_idx];
+		const hebs_exec_instruction_t* const exec_base = &plan->comb_exec_data[span->start];
+		uint32_t local_idx;
+
+		ctx->probe_chunk_exec += 1U;
+		ctx->probe_gate_eval += (uint64_t)span->count;
+
+		for (local_idx = 0U; local_idx < span->count; ++local_idx)
 		{
-			case HEBS_GATE_AND:
-				hebs_execute_and_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_OR:
-				hebs_execute_or_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_XOR:
-				hebs_execute_xor_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_NOT:
-				hebs_execute_not_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_NAND:
-				hebs_execute_nand_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_NOR:
-				hebs_execute_nor_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_XNOR:
-				hebs_execute_xnor_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_BUF:
-				hebs_execute_buf_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_TRI:
-				hebs_execute_tri_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_VCC:
-				hebs_execute_vcc_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_GND:
-				hebs_execute_gnd_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_PUP:
-				hebs_execute_pup_chunk(ctx, plan, span->start, span->count );
-				break;
-			case HEBS_GATE_PDN:
-				hebs_execute_pdn_chunk(ctx, plan, span->start, span->count );
-				break;
-			default:
-				break;
+			const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
+			const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+			const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
+			const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+			const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+			const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+			const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+
+			if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+			{
+				continue;
+
+			}
+
+			hebs_mailbox_or(
+				ctx,
+				dst_net_id,
+				hebs_eval_gate_nibble(ctx, (hebs_gate_type_t)exec_instr->gate_type, src_a_pstate, src_b_pstate, src_a_net_id));
 
 		}
 
@@ -677,114 +318,124 @@ static void hebs_execute_combinational_batched(hebs_engine* ctx, const hebs_plan
 
 }
 
-static void hebs_execute_combinational_fallback(hebs_engine* ctx, const hebs_plan* plan)
+static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan)
 {
 	uint32_t instr_idx;
-#if HEBS_COMPAT_PROBES_ENABLED
-	uint64_t state_change_count = 0U;
-#endif
-	uint64_t write_count = 0U;
 
 	for (instr_idx = 0U; instr_idx < plan->gate_count; ++instr_idx)
 	{
-		const hebs_lep_instruction_t* instr = &plan->lep_data[instr_idx];
-		hebs_logic_t a = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_a_bit_offset);
-		hebs_logic_t result = HEBS_X;
+		const hebs_lep_instruction_t* const instr = &plan->lep_data[instr_idx];
+		const uint32_t dst_net_id = instr->dst_bit_offset >> 1U;
+		const uint32_t src_a_net_id = instr->src_a_bit_offset >> 1U;
+		const uint32_t src_b_net_id = instr->src_b_bit_offset >> 1U;
+		const uint8_t src_a_pstate = hebs_read_pstate_net(ctx, src_a_net_id);
+		const uint8_t src_b_pstate = hebs_read_pstate_net(ctx, src_b_net_id);
 
-		switch ((hebs_gate_type_t)instr->gate_type)
+		if ((hebs_gate_type_t)instr->gate_type == HEBS_GATE_DFF)
 		{
-			case HEBS_GATE_AND:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_and(a, b);
-				break;
-			}
-			case HEBS_GATE_OR:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_or(a, b);
-				break;
-			}
-			case HEBS_GATE_XOR:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_xor(a, b);
-				break;
-			}
-			case HEBS_GATE_NOT:
-				result = hebs_eval_not(a);
-				break;
-			case HEBS_GATE_NAND:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_not(hebs_eval_and(a, b));
-				break;
-			}
-			case HEBS_GATE_NOR:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_not(hebs_eval_or(a, b));
-				break;
-			}
-			case HEBS_GATE_XNOR:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_xnor(a, b);
-				break;
-			}
-			case HEBS_GATE_BUF:
-				result = a;
-				break;
-			case HEBS_GATE_TRI:
-			{
-				hebs_logic_t b = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->src_b_bit_offset);
-				result = hebs_eval_tristate(a, b);
-				break;
-			}
-			case HEBS_GATE_VCC:
-				result = hebs_eval_vcc();
-				break;
-			case HEBS_GATE_GND:
-				result = hebs_eval_gnd();
-				break;
-			case HEBS_GATE_PUP:
-				result = hebs_eval_weak_pull(a);
-				break;
-			case HEBS_GATE_PDN:
-				result = hebs_eval_weak_pull_down(a);
-				break;
-			case HEBS_GATE_DFF:
-				continue;
-			default:
-				result = HEBS_X;
-				break;
+			continue;
 
 		}
 
-		++write_count;
-		#if HEBS_COMPAT_PROBES_ENABLED
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
-			const hebs_logic_t old_value = hebs_read_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->dst_bit_offset);
-			hebs_write_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->dst_bit_offset, result);
-			state_change_count += (uint64_t)(old_value != result);
+			continue;
 
 		}
-		#else
-		hebs_write_logic_at_offset(ctx->next_signal_trays, ctx->tray_count, instr->dst_bit_offset, result);
-		#endif
+
+		ctx->probe_chunk_exec += 1U;
+		ctx->probe_gate_eval += 1U;
+		hebs_mailbox_or(
+			ctx,
+			dst_net_id,
+			hebs_eval_gate_nibble(ctx, (hebs_gate_type_t)instr->gate_type, src_a_pstate, src_b_pstate, src_a_net_id));
 
 	}
 
-	ctx->probe_gate_eval += write_count;
-	ctx->probe_chunk_exec += write_count;
-#if HEBS_COMPAT_PROBES_ENABLED
-	ctx->probe_state_change_commit += state_change_count;
+}
+
+static void hebs_phase_evaluate(hebs_engine* ctx, const hebs_plan* plan)
+{
+	if (plan->comb_exec_data && plan->comb_spans && plan->comb_span_count > 0U)
+	{
+		hebs_phase_evaluate_batched(ctx, plan);
+		return;
+
+	}
+
+	hebs_phase_evaluate_fallback(ctx, plan);
+
+}
+
+static void hebs_phase_resolve(hebs_engine* ctx)
+{
+	uint32_t dirty_idx;
+
+	for (dirty_idx = 0U; dirty_idx < ctx->dirty_count; ++dirty_idx)
+	{
+		const uint32_t net_id = ctx->dirty_net_ids[dirty_idx];
+		const uint8_t lut_value = HEBS_FUSED_LUT[ctx->net_mailbox[net_id] & 0x0FU];
+		const uint8_t resolved_3bn = (uint8_t)(lut_value & 0x07U);
+		const uint8_t next_pstate = (uint8_t)((lut_value >> 5U) & 0x03U);
+#if HEBS_TEST_PROBES
+		const uint8_t old_value = ctx->net_physical[net_id];
 #endif
+
+		ctx->net_physical[net_id] = resolved_3bn;
+		hebs_write_pstate_net(ctx, net_id, next_pstate);
+		ctx->net_mailbox[net_id] = 0U;
+		ctx->dirty_net_flags[net_id] = 0U;
+#if HEBS_TEST_PROBES
+		ctx->probe_state_change_commit += (uint64_t)(old_value != resolved_3bn);
+#endif
+
+	}
+
+	ctx->dirty_count = 0U;
+
+}
+
+static void hebs_phase_commit_dff(hebs_engine* ctx, const hebs_plan* plan)
+{
+	uint32_t instr_idx;
+
+	if (!plan->dff_exec_data || plan->dff_exec_count == 0U)
+	{
+		return;
+
+	}
+
+	for (instr_idx = 0U; instr_idx < plan->dff_exec_count; ++instr_idx)
+	{
+		const hebs_exec_instruction_t* const exec_instr = &plan->dff_exec_data[instr_idx];
+		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		const uint8_t data_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		const uint8_t clk_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		const uint8_t data_l = (uint8_t)(data_pstate & 1U);
+		const uint8_t data_x = (uint8_t)((data_pstate >> 1U) & 1U);
+		const uint8_t clk_x = (uint8_t)((clk_pstate >> 1U) & 1U);
+		const uint8_t capture_x = (uint8_t)(data_x | clk_x);
+		const uint8_t next_l = (uint8_t)(data_l & (uint8_t)(capture_x ^ 1U));
+		const uint8_t next_pstate = (uint8_t)(next_l | (uint8_t)(capture_x << 1U));
+		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+
+		hebs_write_pstate_to_trays(ctx->dff_state_trays, dst_net_id, next_pstate);
+		if (dst_net_id < ctx->net_count)
+		{
+			hebs_mailbox_or(ctx, dst_net_id, hebs_make_drive_nibble(next_l, capture_x, 1U));
+
+		}
+		ctx->probe_dff_exec += 1U;
+
+	}
 
 }
 
 hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 {
+	uint32_t net_id;
+
 	if (!ctx || !plan)
 	{
 		if (ctx)
@@ -796,35 +447,42 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 
 	}
 
-	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS)
+	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS || plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
 	{
 		ctx->last_status = HEBS_ERR_LOGIC;
 		return HEBS_ERR_LOGIC;
 
 	}
 
-	if (plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
-	{
-		ctx->last_status = HEBS_ERR_LOGIC;
-		return HEBS_ERR_LOGIC;
-
-	}
-
-	ctx->current_tick = 0;
+	ctx->current_tick = 0U;
 	ctx->tray_count = plan->tray_count;
-	ctx->cycles_executed = 0;
-	ctx->vectors_applied = 0;
-	ctx->probe_input_apply = 0;
-	ctx->probe_input_toggle = 0;
-	ctx->probe_chunk_exec = 0;
-	ctx->probe_state_change_commit = 0;
-	ctx->probe_dff_exec = 0;
-	ctx->probe_gate_eval = 0;
+	ctx->net_count = plan->signal_count;
+	ctx->dirty_count = 0U;
+	ctx->cycles_executed = 0U;
+	ctx->vectors_applied = 0U;
+	ctx->probe_input_apply = 0U;
+	ctx->probe_input_toggle = 0U;
+	ctx->probe_chunk_exec = 0U;
+	ctx->probe_gate_eval = 0U;
+	ctx->probe_state_change_commit = 0U;
+	ctx->probe_dff_exec = 0U;
 	memset(ctx->tray_plane_a, 0, sizeof(ctx->tray_plane_a));
 	memset(ctx->tray_plane_b, 0, sizeof(ctx->tray_plane_b));
 	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
+	memset(ctx->net_physical, 0, sizeof(ctx->net_physical));
+	memset(ctx->net_mailbox, 0, sizeof(ctx->net_mailbox));
+	memset(ctx->dirty_net_ids, 0, sizeof(ctx->dirty_net_ids));
+	memset(ctx->dirty_net_flags, 0, sizeof(ctx->dirty_net_flags));
 	ctx->signal_trays = ctx->tray_plane_a;
-	ctx->next_signal_trays = ctx->tray_plane_b;
+	ctx->next_signal_trays = ctx->tray_plane_a;
+
+	for (net_id = 0U; net_id < ctx->net_count; ++net_id)
+	{
+		ctx->net_physical[net_id] = HEBS_STATE_Z;
+		hebs_write_pstate_net(ctx, net_id, 0x0U);
+
+	}
+
 	ctx->last_status = HEBS_OK;
 	return HEBS_OK;
 
@@ -832,7 +490,7 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 
 void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 {
-	if (!ctx || !plan)
+	if (!ctx || !plan || !ctx->signal_trays)
 	{
 		if (ctx)
 		{
@@ -842,23 +500,13 @@ void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 		return;
 
 	}
-	memcpy(ctx->next_signal_trays, ctx->signal_trays, (size_t)ctx->tray_count * sizeof(uint64_t));
-	if (plan->comb_exec_data && plan->comb_spans && plan->comb_span_count > 0U)
-	{
-		hebs_execute_combinational_batched(ctx, plan );
 
-	}
-	else
-	{
-		hebs_execute_combinational_fallback(ctx, plan );
-
-	}
-
-	hebs_sequential_commit(ctx, plan);
-	hebs_swap_active_trays(ctx);
-	++ctx->cycles_executed;
-	++ctx->vectors_applied;
-	ctx->current_tick++;
+	hebs_phase_evaluate(ctx, plan);
+	hebs_phase_resolve(ctx);
+	hebs_phase_commit_dff(ctx, plan);
+	ctx->cycles_executed += 1U;
+	ctx->vectors_applied += 1U;
+	ctx->current_tick += 1U;
 	ctx->last_status = HEBS_OK;
 
 }
@@ -875,11 +523,13 @@ hebs_probes hebs_get_probes(const hebs_engine* ctx)
 	}
 
 	probes.input_apply = ctx->probe_input_apply;
-	probes.input_toggle = ctx->probe_input_toggle;
 	probes.chunk_exec = ctx->probe_chunk_exec;
 	probes.gate_eval = ctx->probe_gate_eval;
-	probes.state_change_commit = ctx->probe_state_change_commit;
 	probes.dff_exec = ctx->probe_dff_exec;
+#if HEBS_TEST_PROBES
+	probes.input_toggle = ctx->probe_input_toggle;
+	probes.state_change_commit = ctx->probe_state_change_commit;
+#endif
 	return probes;
 
 }
@@ -897,7 +547,7 @@ int hebs_get_run_status(const hebs_engine* ctx, hebs_run_status* out_status)
 	out_status->cycles_executed = ctx->cycles_executed;
 	out_status->vectors_applied = ctx->vectors_applied;
 	out_status->tray_count = ctx->tray_count;
-	out_status->compat_metrics_enabled = (uint8_t)HEBS_COMPAT_PROBES_ENABLED;
+	out_status->test_probes_enabled = (uint8_t)HEBS_TEST_PROBES;
 	return 1;
 
 }
@@ -905,11 +555,11 @@ int hebs_get_run_status(const hebs_engine* ctx, hebs_run_status* out_status)
 uint64_t hebs_get_state_hash(hebs_engine* ctx)
 {
 	uint64_t hash;
-	uint32_t tray_idx;
+	uint32_t net_idx;
 
 	if (!ctx)
 	{
-		return 0;
+		return 0U;
 
 	}
 
@@ -917,9 +567,9 @@ uint64_t hebs_get_state_hash(hebs_engine* ctx)
 	hash ^= ctx->current_tick;
 	hash *= 1099511628211ULL;
 
-	for (tray_idx = 0; tray_idx < ctx->tray_count; ++tray_idx)
+	for (net_idx = 0U; net_idx < ctx->net_count; ++net_idx)
 	{
-		hash ^= ctx->signal_trays[tray_idx];
+		hash ^= (uint64_t)ctx->net_physical[net_idx];
 		hash *= 1099511628211ULL;
 
 	}
@@ -930,13 +580,13 @@ uint64_t hebs_get_state_hash(hebs_engine* ctx)
 
 uint32_t hebs_get_final_crc32(const hebs_engine* ctx)
 {
-	if (!ctx || !ctx->signal_trays || ctx->tray_count == 0U)
+	if (!ctx || ctx->net_count == 0U)
 	{
 		return 0U;
 
 	}
 
-	return hebs_crc32_bytes((const uint8_t*)ctx->signal_trays, (size_t)ctx->tray_count * sizeof(uint64_t));
+	return hebs_crc32_bytes(ctx->net_physical, (size_t)ctx->net_count);
 
 }
 
@@ -981,10 +631,8 @@ int hebs_get_plan_metadata(const hebs_plan* plan, hebs_plan_metadata* out_metada
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value)
 {
 	uint32_t signal_id;
-	uint32_t bit_offset;
-#if HEBS_COMPAT_PROBES_ENABLED
-	hebs_logic_t old_value;
-#endif
+	uint8_t physical_value;
+	uint8_t pstate_value;
 
 	if (!ctx || !plan || input_index >= plan->num_primary_inputs)
 	{
@@ -1005,36 +653,57 @@ hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, ui
 	}
 
 	signal_id = plan->primary_input_ids[input_index];
-	bit_offset = signal_id * 2U;
-	++ctx->probe_input_apply;
-#if HEBS_COMPAT_PROBES_ENABLED
-	old_value = hebs_read_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset);
-	if (old_value != value)
+	if (signal_id >= ctx->net_count)
 	{
-		++ctx->probe_input_toggle;
+		ctx->last_status = HEBS_ERR_LOGIC;
+		return HEBS_ERR_LOGIC;
 
 	}
-	#endif
-	hebs_write_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset, value);
+
+	physical_value = hebs_logic_to_physical(value);
+	pstate_value = hebs_physical_to_pstate(physical_value);
+	ctx->probe_input_apply += 1U;
+#if HEBS_TEST_PROBES
+	ctx->probe_input_toggle += (uint64_t)(ctx->net_physical[signal_id] != physical_value);
+#endif
+	ctx->net_physical[signal_id] = physical_value;
+	hebs_write_pstate_net(ctx, signal_id, pstate_value);
 	ctx->last_status = HEBS_OK;
 	return HEBS_OK;
 
 }
 
-hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index)
+uint8_t hebs_get_primary_input_state(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index)
 {
 	uint32_t signal_id;
-	uint32_t bit_offset;
 
 	if (!ctx || !plan || input_index >= plan->num_primary_inputs)
+	{
+		return 0xFFU;
+
+	}
+
+	signal_id = plan->primary_input_ids[input_index];
+	if (signal_id >= ctx->net_count)
+	{
+		return 0xFFU;
+
+	}
+
+	return (uint8_t)(ctx->net_physical[signal_id] & 0x7U);
+
+}
+
+hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index)
+{
+	const uint8_t physical_value = hebs_get_primary_input_state(ctx, plan, input_index);
+	if (physical_value == 0xFFU)
 	{
 		return HEBS_X;
 
 	}
 
-	signal_id = plan->primary_input_ids[input_index];
-	bit_offset = signal_id * 2U;
-	return hebs_read_logic_at_offset(ctx->signal_trays, ctx->tray_count, bit_offset);
+	return hebs_physical_to_logic(physical_value);
 
 }
 

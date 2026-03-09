@@ -40,7 +40,7 @@ typedef struct hebs_metric_group_s
 	uint32_t propagation_depth;
 	uint32_t fanout_max;
 	uint32_t total_fanout_edges;
-	uint8_t compat_metrics_enabled;
+	uint8_t test_probes_enabled;
 	double* runtimes_sec;
 	double* geps_values;
 	double* icf_values;
@@ -83,7 +83,7 @@ enum hebs_raw_col_index_e
 	HEBS_RAW_PROPAGATION_DEPTH = 23,
 	HEBS_RAW_FANOUT_MAX = 24,
 	HEBS_RAW_TOTAL_FANOUT_EDGES = 25,
-	HEBS_RAW_COMPAT_METRICS_ENABLED = 26
+	HEBS_RAW_TEST_PROBES_ENABLED = 26
 };
 
 enum hebs_derived_col_index_e
@@ -128,7 +128,7 @@ enum hebs_derived_col_index_e
 	HEBS_DERIVED_DELTA_ICF_PCT = 37,
 	HEBS_DERIVED_FINGERPRINT_STABLE = 38,
 	HEBS_DERIVED_LOGIC_CRC32 = 39,
-	HEBS_DERIVED_COMPAT_METRICS_ENABLED = 40
+	HEBS_DERIVED_TEST_PROBES_ENABLED = 40
 };
 
 static int hebs_copy_text_fit(char* out, size_t out_size, const char* text)
@@ -184,6 +184,18 @@ static char* hebs_trim_in_place(char* text)
 	}
 
 	return text;
+
+}
+
+static int hebs_is_compat_metrics_header(const char* token)
+{
+	if (!token)
+	{
+		return 0;
+
+	}
+
+	return (strcmp(token, "compat_metrics_enabled") == 0 || strcmp(token, "test_probes_enabled") == 0);
 
 }
 
@@ -488,7 +500,7 @@ static int hebs_create_group(
 	uint32_t propagation_depth;
 	uint32_t fanout_max;
 	uint32_t total_fanout_edges;
-	uint32_t compat_metrics_enabled;
+	uint32_t test_probes_enabled;
 
 	if (!groups || !group_count || !group_capacity || !fields || !out_group)
 	{
@@ -503,7 +515,7 @@ static int hebs_create_group(
 		!hebs_parse_u32(fields[HEBS_RAW_PROPAGATION_DEPTH], &propagation_depth) ||
 		!hebs_parse_u32(fields[HEBS_RAW_FANOUT_MAX], &fanout_max) ||
 		!hebs_parse_u32(fields[HEBS_RAW_TOTAL_FANOUT_EDGES], &total_fanout_edges) ||
-		!hebs_parse_u32(fields[HEBS_RAW_COMPAT_METRICS_ENABLED], &compat_metrics_enabled))
+		!hebs_parse_u32(fields[HEBS_RAW_TEST_PROBES_ENABLED], &test_probes_enabled))
 	{
 		return 0;
 
@@ -538,7 +550,7 @@ static int hebs_create_group(
 	slot->propagation_depth = propagation_depth;
 	slot->fanout_max = fanout_max;
 	slot->total_fanout_edges = total_fanout_edges;
-	slot->compat_metrics_enabled = (uint8_t)compat_metrics_enabled;
+	slot->test_probes_enabled = (uint8_t)test_probes_enabled;
 	*out_group = slot;
 	++(*group_count);
 	return 1;
@@ -956,6 +968,13 @@ static int hebs_load_raw_groups(const char* input_csv, hebs_metric_group_t** out
 
 		if (strcmp(fields[HEBS_RAW_RUN_ID], "run_id") == 0)
 		{
+			if (!hebs_is_compat_metrics_header(fields[HEBS_RAW_TEST_PROBES_ENABLED]))
+			{
+				hebs_free_groups(groups, group_count);
+				fclose(file);
+				return 0;
+
+			}
 			continue;
 
 		}
@@ -1230,7 +1249,7 @@ static int hebs_write_derived_rows(FILE* output_file, const hebs_metric_group_t*
 			delta_icf_prev_pct,
 			(unsigned int)fingerprint_stable,
 			(unsigned int)crc32,
-			(unsigned int)group->compat_metrics_enabled) <= 0)
+			(unsigned int)group->test_probes_enabled) <= 0)
 		{
 			return 0;
 

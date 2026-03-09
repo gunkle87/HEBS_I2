@@ -7,7 +7,7 @@ static void hebs_sequential_commit_scalar(hebs_engine* ctx, const hebs_plan* pla
 {
 	uint32_t instr_idx;
 	uint64_t dff_exec_count = 0U;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 	uint64_t state_change_count = 0U;
 #endif
 
@@ -23,14 +23,14 @@ static void hebs_sequential_commit_scalar(hebs_engine* ctx, const hebs_plan* pla
 		++dff_exec_count;
 		ctx->dff_state_trays[exec_instr->dst_tray] = new_value;
 		ctx->next_signal_trays[exec_instr->dst_tray] = (signal_tray & ~exec_instr->dst_mask) | shifted_lane;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 		state_change_count += (uint64_t)(new_value != state_tray);
 #endif
 
 	}
 
 	ctx->probe_dff_exec += dff_exec_count;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 	ctx->probe_state_change_commit += state_change_count;
 #endif
 
@@ -42,7 +42,7 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 	uint32_t instr_idx;
 	uint32_t tray_idx;
 	uint64_t dff_exec_count = 0U;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 	uint64_t state_change_count = 0U;
 #endif
 
@@ -62,7 +62,7 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 		const uint64_t tray_value = staged_dff_trays[exec_instr->dst_tray];
 		const uint64_t new_value = (tray_value & ~exec_instr->dst_mask) | shifted_lane;
 		++dff_exec_count;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 		state_change_count += (uint64_t)(new_value != tray_value);
 #endif
 		staged_dff_trays[exec_instr->dst_tray] = new_value;
@@ -77,11 +77,11 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 		if (commit_mask != 0U)
 		{
 			const uint64_t merged = (ctx->next_signal_trays[tray_idx] & ~commit_mask) | (committed_tray & commit_mask);
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 			const uint64_t old_next = ctx->next_signal_trays[tray_idx];
 #endif
 			ctx->next_signal_trays[tray_idx] = merged;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 			state_change_count += (uint64_t)(merged != old_next);
 #endif
 
@@ -90,7 +90,7 @@ static void hebs_sequential_commit_vectorized(hebs_engine* ctx, const hebs_plan*
 	}
 
 	ctx->probe_dff_exec += dff_exec_count;
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 	ctx->probe_state_change_commit += state_change_count;
 #endif
 

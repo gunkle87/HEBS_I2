@@ -6,16 +6,658 @@
 
 static hebs_logic_t read_signal_state(const hebs_engine* engine, uint32_t signal_id)
 {
-	uint32_t tray_index = signal_id / 32U;
-	uint32_t bit_position = (signal_id % 32U) * 2U;
-	uint64_t tray = engine->signal_trays[tray_index];
-	return (hebs_logic_t)((tray >> bit_position) & 0x3U);
+	const uint32_t tray_index = signal_id / 32U;
+	const uint32_t bit_position = (signal_id % 32U) * 2U;
+	const uint64_t* tray_ptr = hebs_get_signal_tray(engine, tray_index);
+	if (!tray_ptr)
+	{
+		return (hebs_logic_t)0U;
+
+	}
+
+	return (hebs_logic_t)((*tray_ptr >> bit_position) & 0x3U);
 
 }
 
-static hebs_logic_t pack2(hebs_logic_t value)
+static uint8_t project_logic_to_pstate(hebs_logic_t value)
 {
-	return (hebs_logic_t)((uint32_t)value & 0x3U);
+	switch (value)
+	{
+		case HEBS_S1:
+		case HEBS_W1:
+			return 0x1U;
+		case HEBS_S0:
+		case HEBS_W0:
+		case HEBS_Z:
+			return 0x0U;
+		case HEBS_SX:
+		case HEBS_WX:
+		case HEBS_X:
+		default:
+			return 0x2U;
+
+	}
+
+}
+
+static uint8_t eval_and_from_pstate(uint8_t a_pstate, uint8_t b_pstate)
+{
+	const uint8_t a_l = (uint8_t)(a_pstate & 0x1U);
+	const uint8_t b_l = (uint8_t)(b_pstate & 0x1U);
+	const uint8_t a_x = (uint8_t)((a_pstate >> 1U) & 0x1U);
+	const uint8_t b_x = (uint8_t)((b_pstate >> 1U) & 0x1U);
+	const uint8_t out_l = (uint8_t)(a_l & b_l);
+	const uint8_t out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
+	return (uint8_t)((out_x << 1U) | out_l);
+
+}
+
+static uint8_t eval_or_from_pstate(uint8_t a_pstate, uint8_t b_pstate)
+{
+	const uint8_t a_l = (uint8_t)(a_pstate & 0x1U);
+	const uint8_t b_l = (uint8_t)(b_pstate & 0x1U);
+	const uint8_t a_x = (uint8_t)((a_pstate >> 1U) & 0x1U);
+	const uint8_t b_x = (uint8_t)((b_pstate >> 1U) & 0x1U);
+	const uint8_t out_l = (uint8_t)(a_l | b_l);
+	const uint8_t out_x = (uint8_t)((a_x | b_x) & (a_l ^ 0x1U) & (b_l ^ 0x1U));
+	return (uint8_t)((out_x << 1U) | out_l);
+
+}
+
+static uint32_t net_to_bit(uint32_t net_id)
+{
+	return net_id * 2U;
+
+}
+
+static uint8_t read_net_pstate(const hebs_engine* engine, uint32_t net_id)
+{
+	return (uint8_t)read_signal_state(engine, net_id);
+
+}
+
+static uint8_t read_net_logic(const hebs_engine* engine, uint32_t net_id)
+{
+	return (uint8_t)(read_net_pstate(engine, net_id) & 0x1U);
+
+}
+
+static uint8_t read_net_xflag(const hebs_engine* engine, uint32_t net_id)
+{
+	return (uint8_t)((read_net_pstate(engine, net_id) >> 1U) & 0x1U);
+
+}
+
+static void test_phase3_strength_precedence_strong_over_weak(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_GND;
+	lep_data[0].input_count = 0U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(0U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_PUP;
+	lep_data[1].input_count = 1U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(0U);
+	lep_data[1].dst_bit_offset = net_to_bit(2U);
+
+	plan.lep_hash = 1001U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 3U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_Z) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_logic(&engine, 2U) == 0U);
+	assert(read_net_xflag(&engine, 2U) == 0U);
+
+}
+
+static void test_and_or_dominance_x_suppression(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[2] = { 0U, 1U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_AND;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(1U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_OR;
+	lep_data[1].input_count = 2U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(1U);
+	lep_data[1].dst_bit_offset = net_to_bit(3U);
+
+	plan.lep_hash = 1002U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 4U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_SX) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_logic(&engine, 2U) == 0U);
+	assert(read_net_xflag(&engine, 2U) == 0U);
+	assert(read_net_xflag(&engine, 3U) == 1U);
+
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_SX) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_logic(&engine, 3U) == 1U);
+	assert(read_net_xflag(&engine, 3U) == 0U);
+	assert(read_net_xflag(&engine, 2U) == 1U);
+
+}
+
+static void test_and_nand_x_dominance(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[2] = { 0U, 1U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_AND;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(1U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_NAND;
+	lep_data[1].input_count = 2U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(1U);
+	lep_data[1].dst_bit_offset = net_to_bit(3U);
+
+	plan.lep_hash = 1010U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 4U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_SX) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_logic(&engine, 2U) == 0U);
+	assert(read_net_xflag(&engine, 2U) == 1U);
+	assert(read_net_logic(&engine, 3U) == 0U);
+	assert(read_net_xflag(&engine, 3U) == 1U);
+
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_SX) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_logic(&engine, 2U) == 0U);
+	assert(read_net_xflag(&engine, 2U) == 0U);
+	assert(read_net_logic(&engine, 3U) == 1U);
+	assert(read_net_xflag(&engine, 3U) == 0U);
+
+}
+
+static void test_or_nor_x_dominance(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[2] = { 0U, 1U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_OR;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(1U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_NOR;
+	lep_data[1].input_count = 2U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(1U);
+	lep_data[1].dst_bit_offset = net_to_bit(3U);
+
+	plan.lep_hash = 1011U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 4U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_SX) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_logic(&engine, 2U) == 1U);
+	assert(read_net_xflag(&engine, 2U) == 0U);
+	assert(read_net_logic(&engine, 3U) == 0U);
+	assert(read_net_xflag(&engine, 3U) == 0U);
+
+}
+
+static void test_tristate_disabled_is_zero_drive(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[2] = { 0U, 1U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_TRI;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(1U);
+	lep_data[0].dst_bit_offset = net_to_bit(3U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[1].input_count = 0U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(0U);
+	lep_data[1].dst_bit_offset = net_to_bit(3U);
+
+	plan.lep_hash = 1003U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 4U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S0) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 3U) == 0x1U);
+	assert(read_net_logic(&engine, 3U) == 1U);
+	assert(read_net_xflag(&engine, 3U) == 0U);
+
+}
+
+static void test_multi_driver_phase1_or_not_overwrite(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_lep_instruction_t lep_data[2];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_GND;
+	lep_data[0].input_count = 0U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(0U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[1].input_count = 0U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(0U);
+	lep_data[1].dst_bit_offset = net_to_bit(2U);
+
+	plan.lep_hash = 1004U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 3U;
+	plan.gate_count = 2U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x2U);
+	assert(read_net_xflag(&engine, 2U) == 1U);
+
+}
+
+static void test_full_net_contention_64plus(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_lep_instruction_t lep_data[66];
+	hebs_plan plan = { 0 };
+	uint32_t gate_idx;
+	uint32_t cycle;
+
+	for (gate_idx = 0U; gate_idx < 66U; ++gate_idx)
+	{
+		hebs_gate_type_t gate_type = HEBS_GATE_GND;
+		if ((gate_idx % 3U) == 1U)
+		{
+			gate_type = HEBS_GATE_VCC;
+
+		}
+		else if ((gate_idx % 3U) == 2U)
+		{
+			gate_type = HEBS_GATE_PUP;
+
+		}
+		lep_data[gate_idx].gate_type = (uint8_t)gate_type;
+		lep_data[gate_idx].input_count = (gate_type == HEBS_GATE_PUP) ? 1U : 0U;
+		lep_data[gate_idx].level = 1U;
+		lep_data[gate_idx].src_a_bit_offset = net_to_bit(0U);
+		lep_data[gate_idx].src_b_bit_offset = net_to_bit(0U);
+		lep_data[gate_idx].dst_bit_offset = net_to_bit(2U);
+
+	}
+
+	plan.lep_hash = 1005U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 3U;
+	plan.gate_count = 66U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_Z) == HEBS_OK);
+	for (cycle = 0U; cycle < 5U; ++cycle)
+	{
+		hebs_tick(&engine, &plan);
+		assert((uint8_t)read_signal_state(&engine, 2U) == 0x2U);
+		assert(read_net_xflag(&engine, 2U) == 1U);
+
+	}
+
+}
+
+static void test_dff_x_poison_chain_latency_10(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[2] = { 0U, 11U };
+	hebs_exec_instruction_t dff_exec_data[10];
+	hebs_plan plan = { 0 };
+	uint32_t idx;
+	uint32_t step;
+
+	for (idx = 0U; idx < 10U; ++idx)
+	{
+		const uint32_t src_net = idx;
+		const uint32_t dst_net = idx + 1U;
+		dff_exec_data[idx].gate_type = (uint8_t)HEBS_GATE_DFF;
+		dff_exec_data[idx].src_a_shift = (uint8_t)(net_to_bit(src_net) % 64U);
+		dff_exec_data[idx].src_b_shift = (uint8_t)(net_to_bit(11U) % 64U);
+		dff_exec_data[idx].dst_shift = (uint8_t)(net_to_bit(dst_net) % 64U);
+		dff_exec_data[idx].src_a_tray = net_to_bit(src_net) / 64U;
+		dff_exec_data[idx].src_b_tray = net_to_bit(11U) / 64U;
+		dff_exec_data[idx].dst_tray = net_to_bit(dst_net) / 64U;
+		dff_exec_data[idx].dst_mask = 0x3ULL << dff_exec_data[idx].dst_shift;
+
+	}
+
+	plan.lep_hash = 1006U;
+	plan.level_count = 1U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 12U;
+	plan.gate_count = 0U;
+	plan.tray_count = 1U;
+	plan.max_level = 0U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = NULL;
+	plan.dff_exec_count = 10U;
+	plan.dff_exec_data = dff_exec_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_X) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
+
+	for (step = 1U; step <= 10U; ++step)
+	{
+		uint32_t stage;
+		uint32_t x_count = 0U;
+		hebs_tick(&engine, &plan);
+		for (stage = 1U; stage <= 10U; ++stage)
+		{
+			const uint8_t is_x = read_net_xflag(&engine, stage);
+			x_count += is_x;
+			if (stage == step)
+			{
+				assert(is_x == 1U);
+
+			}
+			else
+			{
+				assert(is_x == 0U);
+
+			}
+
+		}
+		assert(x_count == 1U);
+
+	}
+
+}
+
+static void test_dirty_set_sparse_dense_saturation(void)
+{
+	{
+		hebs_engine engine = { 0 };
+		uint32_t primary_inputs[64];
+		hebs_lep_instruction_t lep_data[4];
+		hebs_plan plan = { 0 };
+		uint32_t i;
+		uint32_t sparse_idx;
+		const uint32_t sparse_inputs[4] = { 0U, 17U, 34U, 51U };
+
+		for (i = 0U; i < 64U; ++i)
+		{
+			primary_inputs[i] = i;
+
+		}
+
+		for (sparse_idx = 0U; sparse_idx < 4U; ++sparse_idx)
+		{
+			const uint32_t src = sparse_inputs[sparse_idx];
+			lep_data[sparse_idx].gate_type = (uint8_t)HEBS_GATE_BUF;
+			lep_data[sparse_idx].input_count = 1U;
+			lep_data[sparse_idx].level = 1U;
+			lep_data[sparse_idx].src_a_bit_offset = net_to_bit(src);
+			lep_data[sparse_idx].src_b_bit_offset = net_to_bit(src);
+			lep_data[sparse_idx].dst_bit_offset = net_to_bit(src + 64U);
+
+		}
+
+		plan.lep_hash = 1007U;
+		plan.level_count = 2U;
+		plan.num_primary_inputs = 64U;
+		plan.signal_count = 128U;
+		plan.gate_count = 4U;
+		plan.tray_count = 4U;
+		plan.max_level = 1U;
+		plan.primary_input_ids = primary_inputs;
+		plan.lep_data = lep_data;
+
+		assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+		for (i = 0U; i < 64U; ++i)
+		{
+			const hebs_logic_t val = ((i & 1U) != 0U) ? HEBS_S1 : HEBS_S0;
+			assert(hebs_set_primary_input(&engine, &plan, i, val) == HEBS_OK);
+
+		}
+		hebs_tick(&engine, &plan);
+		for (i = 0U; i < 64U; ++i)
+		{
+			const uint32_t dst = i + 64U;
+			const uint8_t expected_selected = (uint8_t)(i == 0U || i == 17U || i == 34U || i == 51U);
+			if (expected_selected != 0U)
+			{
+				assert((uint8_t)read_signal_state(&engine, dst) == (((i & 1U) != 0U) ? 0x1U : 0x0U));
+
+			}
+			else
+			{
+				assert((uint8_t)read_signal_state(&engine, dst) == 0x0U);
+
+			}
+
+		}
+
+	}
+
+	{
+		hebs_engine engine = { 0 };
+		uint32_t primary_inputs[64];
+		hebs_lep_instruction_t lep_data[64];
+		hebs_plan plan = { 0 };
+		uint32_t i;
+
+		for (i = 0U; i < 64U; ++i)
+		{
+			primary_inputs[i] = i;
+			lep_data[i].gate_type = (uint8_t)HEBS_GATE_BUF;
+			lep_data[i].input_count = 1U;
+			lep_data[i].level = 1U;
+			lep_data[i].src_a_bit_offset = net_to_bit(i);
+			lep_data[i].src_b_bit_offset = net_to_bit(i);
+			lep_data[i].dst_bit_offset = net_to_bit(i + 64U);
+
+		}
+
+		plan.lep_hash = 1008U;
+		plan.level_count = 2U;
+		plan.num_primary_inputs = 64U;
+		plan.signal_count = 128U;
+		plan.gate_count = 64U;
+		plan.tray_count = 4U;
+		plan.max_level = 1U;
+		plan.primary_input_ids = primary_inputs;
+		plan.lep_data = lep_data;
+
+		assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+		for (i = 0U; i < 64U; ++i)
+		{
+			const hebs_logic_t val = ((i & 1U) != 0U) ? HEBS_S1 : HEBS_S0;
+			assert(hebs_set_primary_input(&engine, &plan, i, val) == HEBS_OK);
+
+		}
+		hebs_tick(&engine, &plan);
+		for (i = 0U; i < 64U; ++i)
+		{
+			const uint32_t dst = i + 64U;
+			assert((uint8_t)read_signal_state(&engine, dst) == (((i & 1U) != 0U) ? 0x1U : 0x0U));
+
+		}
+
+	}
+
+}
+
+static void test_cycle_stability_no_temporal_path(void)
+{
+	hebs_engine engine_a = { 0 };
+	hebs_engine engine_b = { 0 };
+	uint32_t primary_inputs[4] = { 0U, 1U, 2U, 3U };
+	hebs_lep_instruction_t lep_data[4];
+	hebs_plan plan = { 0 };
+	uint32_t cycle;
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_AND;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(1U);
+	lep_data[0].dst_bit_offset = net_to_bit(4U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_OR;
+	lep_data[1].input_count = 2U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(2U);
+	lep_data[1].src_b_bit_offset = net_to_bit(3U);
+	lep_data[1].dst_bit_offset = net_to_bit(5U);
+
+	lep_data[2].gate_type = (uint8_t)HEBS_GATE_XOR;
+	lep_data[2].input_count = 2U;
+	lep_data[2].level = 1U;
+	lep_data[2].src_a_bit_offset = net_to_bit(4U);
+	lep_data[2].src_b_bit_offset = net_to_bit(5U);
+	lep_data[2].dst_bit_offset = net_to_bit(6U);
+
+	lep_data[3].gate_type = (uint8_t)HEBS_GATE_NOT;
+	lep_data[3].input_count = 1U;
+	lep_data[3].level = 1U;
+	lep_data[3].src_a_bit_offset = net_to_bit(6U);
+	lep_data[3].src_b_bit_offset = net_to_bit(6U);
+	lep_data[3].dst_bit_offset = net_to_bit(7U);
+
+	plan.lep_hash = 1009U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 4U;
+	plan.signal_count = 8U;
+	plan.gate_count = 4U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine_a, &plan) == HEBS_OK);
+	assert(hebs_init_engine(&engine_b, &plan) == HEBS_OK);
+
+	for (cycle = 0U; cycle < 20U; ++cycle)
+	{
+		const hebs_logic_t in0 = ((cycle & 1U) != 0U) ? HEBS_S1 : HEBS_S0;
+		const hebs_logic_t in1 = ((cycle & 2U) != 0U) ? HEBS_SX : HEBS_S0;
+		const hebs_logic_t in2 = ((cycle & 4U) != 0U) ? HEBS_S1 : HEBS_S0;
+		const hebs_logic_t in3 = ((cycle & 8U) != 0U) ? HEBS_SX : HEBS_S1;
+		uint32_t net_id;
+
+		assert(hebs_set_primary_input(&engine_a, &plan, 0U, in0) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_a, &plan, 1U, in1) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_a, &plan, 2U, in2) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_a, &plan, 3U, in3) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_b, &plan, 0U, in0) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_b, &plan, 1U, in1) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_b, &plan, 2U, in2) == HEBS_OK);
+		assert(hebs_set_primary_input(&engine_b, &plan, 3U, in3) == HEBS_OK);
+
+		hebs_tick(&engine_a, &plan);
+		hebs_tick(&engine_b, &plan);
+		assert(hebs_get_state_hash(&engine_a) == hebs_get_state_hash(&engine_b));
+		assert(hebs_get_final_crc32(&engine_a) == hebs_get_final_crc32(&engine_b));
+		(void)net_id;
+
+	}
 
 }
 
@@ -36,10 +678,10 @@ static void test_loader_contract_from_s27(void)
 	assert(hebs_set_primary_input(&engine, plan, 0, HEBS_S1) == HEBS_OK);
 	hebs_tick(&engine, plan);
 	probes = hebs_get_probes(&engine);
-#if HEBS_COMPAT_PROBES_ENABLED
+#if HEBS_TEST_PROBES
 	assert(probes.input_toggle > 0);
 #else
-	assert(probes.input_toggle == 0U);
+	(void)probes;
 #endif
 	hebs_free_plan(plan);
 
@@ -87,27 +729,34 @@ static void test_functional_gate_suite(void)
 		{
 			hebs_logic_t a = states[a_idx];
 			hebs_logic_t b = states[b_idx];
-			hebs_logic_t a_packed = pack2(a);
-			hebs_logic_t b_packed = pack2(b);
-			assert(hebs_set_primary_input(&engine, &plan, 0U, a_packed) == HEBS_OK);
-			assert(hebs_set_primary_input(&engine, &plan, 1U, b_packed) == HEBS_OK);
+			const uint8_t a_pstate = project_logic_to_pstate(a);
+			const uint8_t b_pstate = project_logic_to_pstate(b);
+			const uint8_t expect_and = eval_and_from_pstate(a_pstate, b_pstate);
+			const uint8_t expect_or = eval_or_from_pstate(a_pstate, b_pstate);
+			assert(hebs_set_primary_input(&engine, &plan, 0U, a) == HEBS_OK);
+			assert(hebs_set_primary_input(&engine, &plan, 1U, b) == HEBS_OK);
 			hebs_tick(&engine, &plan);
-			assert(read_signal_state(&engine, 2U) == pack2(hebs_eval_and(a_packed, b_packed)));
-			assert(read_signal_state(&engine, 3U) == pack2(hebs_eval_or(a_packed, b_packed)));
+			assert((uint8_t)read_signal_state(&engine, 2U) == expect_and);
+			assert((uint8_t)read_signal_state(&engine, 3U) == expect_or);
 
 		}
 
 	}
 
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_W1) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 3U) == 0x1U);
+
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
 	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S1) == HEBS_OK);
 	hebs_tick(&engine, &plan);
-	assert(read_signal_state(&engine, 2U) == HEBS_S0);
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x0U);
 
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
 	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S0) == HEBS_OK);
 	hebs_tick(&engine, &plan);
-	assert(read_signal_state(&engine, 3U) == HEBS_S1);
+	assert((uint8_t)read_signal_state(&engine, 3U) == 0x1U);
 
 }
 
@@ -130,8 +779,10 @@ static void test_interleaved_bit_offset_mapping(void)
 	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
 	assert(read_signal_state(&engine, 33U) == HEBS_S1);
-	assert(engine.signal_trays[0] == 0ULL);
-	assert(((engine.signal_trays[1] >> 2U) & 0x3ULL) == (uint64_t)HEBS_S1);
+	assert(hebs_get_signal_tray(&engine, 0U) != NULL);
+	assert(hebs_get_signal_tray(&engine, 1U) != NULL);
+	assert(*hebs_get_signal_tray(&engine, 0U) == 0ULL);
+	assert(((*hebs_get_signal_tray(&engine, 1U) >> 2U) & 0x3ULL) == 0x1ULL);
 
 }
 
@@ -165,13 +816,14 @@ static void test_icf_math_assertion(void)
 	}
 
 	probes = hebs_get_probes(&engine);
-#if HEBS_COMPAT_PROBES_ENABLED
-	assert(probes.input_toggle == 5U);
-#else
-	assert(probes.input_toggle == 0U);
-#endif
+#if HEBS_TEST_PROBES
+	assert(probes.input_toggle == 6U);
 	assert(probes.state_change_commit == 0U);
 	icf = calculate_icf(probes.state_change_commit, probes.input_toggle);
+#else
+	(void)probes;
+	icf = calculate_icf(0U, 0U);
+#endif
 	assert(fabs(icf - 0.0) < 1e-12);
 	icf = calculate_icf(15U, 5U);
 	assert(fabs(icf - 3.0) < 1e-12);
@@ -226,8 +878,10 @@ static void test_parallel_dff_tray_commit(void)
 
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
 	hebs_tick(&engine, &plan);
-	assert(read_signal_state(&engine, 1U) == HEBS_S1);
-	assert(((engine.dff_state_trays[0] >> 2U) & 0x3ULL) == (uint64_t)HEBS_S1);
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 1U) == 1U);
+	hebs_tick(&engine, &plan);
+	assert((uint8_t)read_signal_state(&engine, 1U) == 1U);
 
 }
 
@@ -299,7 +953,11 @@ static void test_engine_fact_accessors(void)
 	assert(status.last_status == HEBS_OK);
 	assert(status.current_tick == 0U);
 	assert(status.tray_count == plan->tray_count);
-	assert(status.compat_metrics_enabled == (uint8_t)HEBS_COMPAT_PROBES_ENABLED);
+	assert(status.test_probes_enabled == (uint8_t)HEBS_TEST_PROBES);
+	assert(hebs_get_primary_input_state(NULL, plan, 0U) == 0xFFU);
+	assert(hebs_get_primary_input_state(&engine, NULL, 0U) == 0xFFU);
+	assert(hebs_get_primary_input_state(&engine, plan, plan->num_primary_inputs) == 0xFFU);
+	assert(hebs_get_primary_input(&engine, plan, plan->num_primary_inputs) == HEBS_X);
 
 	crc_before = hebs_get_final_crc32(&engine);
 	assert(hebs_set_primary_input(&engine, plan, plan->num_primary_inputs, HEBS_S0) == HEBS_ERR_LOGIC);
@@ -307,6 +965,8 @@ static void test_engine_fact_accessors(void)
 	assert(status.last_status == HEBS_ERR_LOGIC);
 
 	assert(hebs_set_primary_input(&engine, plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_get_primary_input_state(&engine, plan, 0U) == 0x1U);
+	assert(hebs_get_primary_input(&engine, plan, 0U) == HEBS_S1);
 	hebs_tick(&engine, plan);
 	assert(hebs_get_run_status(&engine, &status) == 1);
 	assert(status.last_status == HEBS_OK);
@@ -326,6 +986,16 @@ int main(void)
 	assert(HEBS_S1 == 1);
 	assert(HEBS_WX == 7);
 	test_loader_contract_from_s27();
+	test_phase3_strength_precedence_strong_over_weak();
+	test_and_or_dominance_x_suppression();
+	test_and_nand_x_dominance();
+	test_or_nor_x_dominance();
+	test_tristate_disabled_is_zero_drive();
+	test_multi_driver_phase1_or_not_overwrite();
+	test_full_net_contention_64plus();
+	test_dff_x_poison_chain_latency_10();
+	test_dirty_set_sparse_dense_saturation();
+	test_cycle_stability_no_temporal_path();
 	test_functional_gate_suite();
 	test_interleaved_bit_offset_mapping();
 	test_icf_math_assertion();

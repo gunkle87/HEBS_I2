@@ -328,7 +328,7 @@ static int append_metrics_history_csv(
 	}
 
 	fprintf(file, "%s | %s | %s | %s\n", revision_name, timestamp, date_text, git_commit_hash);
-	fprintf(file, "Suite, Benchmark, Gate_Count, PI_Count, Cycles, ICF, GEPS_Min, GEPS_p50, GEPS_Max, Latency, Propagation_Depth, Fanout_Max, Fingerprint_Stable, Logic_CRC32, Plan_Fingerprint, Base_GEPS, Prev_GEPS, Cur_GEPS, Delta_GEPS_Pct, Base_ICF, Prev_ICF, Cur_ICF, Delta_ICF_Pct, Regression_Gate, Probe_Profile, Compat_Metrics_Enabled\n");
+	fprintf(file, "Suite, Benchmark, Gate_Count, PI_Count, Cycles, ICF, GEPS_Min, GEPS_p50, GEPS_Max, Latency, Propagation_Depth, Fanout_Max, Fingerprint_Stable, Logic_CRC32, Plan_Fingerprint, Base_GEPS, Prev_GEPS, Cur_GEPS, Delta_GEPS_Pct, Base_ICF, Prev_ICF, Cur_ICF, Delta_ICF_Pct, Regression_Gate, Probe_Profile, compat_metrics_enabled\n");
 
 	for (i = 0; i < count; ++i)
 	{
@@ -361,7 +361,7 @@ static int append_metrics_history_csv(
 			row->icf_delta_prev_pct,
 			row->geps_regression_fail ? "FAIL" : "PASS",
 			row->probe_profile,
-			row->compat_metrics_enabled);
+			row->test_probes_enabled);
 
 	}
 

@@ -28,7 +28,7 @@ Exit behavior:
 ## 5. Current Test Catalog
 `test_loader_contract_from_s27`
 - validates loader and plan structural expectations using `s27.bench`
-- validates basic probe behavior under perf versus compat profile
+- validates basic probe behavior under PERF versus TEST profile
 
 `test_functional_gate_suite`
 - validates logical correctness of AND/OR flows over packed state variants
@@ -51,9 +51,9 @@ Exit behavior:
 - validates scalar primitive helpers and selected SIMD helper behavior
 
 ## 6. Profile-Aware Assertions
-Tests include explicit profile-conditional assertions with `HEBS_COMPAT_PROBES_ENABLED`.
-Compatibility-only probe expectations are asserted only in compat profile.
-Perf profile paths assert that compatibility counters stay at zero.
+Tests include explicit profile-conditional assertions with `HEBS_TEST_PROBES`.
+Test-domain probe expectations are asserted only in TEST profile.
+PERF profile paths assert that test-domain counters stay at zero.
 
 ## 7. Determinism Expectations
 Test vectors and control flow are deterministic.
@@ -70,7 +70,7 @@ When adding engine-facing functionality:
 1. Add at least one test function that checks that functionality.
 2. Keep setup explicit and deterministic.
 3. Prefer API-level assertions over internal field mutation.
-4. If profile-specific behavior exists, add perf and compat expectations.
+4. If profile-specific behavior exists, add PERF and TEST expectations.
 5. Keep each test focused on one behavior family.
 
 ## 10. Non-Goals

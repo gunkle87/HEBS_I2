@@ -78,15 +78,13 @@ typedef struct hebs_bench_target_s
 
 } hebs_bench_target_t;
 
-static const char* hebs_probe_profile_name(void)
-{
-#if HEBS_COMPAT_PROBES_ENABLED
-	return "compat";
+#if defined(HEBS_TEST_PROBES) && HEBS_TEST_PROBES
+#define HEBS_RUNNER_PROFILE_NAME "compat"
+#define HEBS_RUNNER_COMPAT_METRICS_ENABLED 1U
 #else
-	return "perf";
+#define HEBS_RUNNER_PROFILE_NAME "perf"
+#define HEBS_RUNNER_COMPAT_METRICS_ENABLED 0U
 #endif
-
-}
 
 static const char* hebs_scope_name(hebs_scope_t scope)
 {
@@ -972,7 +970,7 @@ static int hebs_write_record_meta_head(
 		date_text,
 		time_text,
 		git_hash,
-		hebs_probe_profile_name(),
+		HEBS_RUNNER_PROFILE_NAME,
 		hebs_scope_name(opts->scope),
 		opts->iterations,
 		opts->cycles,
@@ -1033,11 +1031,22 @@ static int hebs_write_raw_row(
 	const hebs_probes* probes,
 	const hebs_plan_metadata* plan_metadata)
 {
+	uint64_t probe_input_toggle;
+	uint64_t probe_state_change_commit;
+
 	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan_metadata)
 	{
 		return 0;
 
 	}
+
+#if defined(HEBS_TEST_PROBES) && HEBS_TEST_PROBES
+	probe_input_toggle = probes->input_toggle;
+	probe_state_change_commit = probes->state_change_commit;
+#else
+	probe_input_toggle = 0ULL;
+	probe_state_change_commit = 0ULL;
+#endif
 
 	fprintf(
 		csv_file,
@@ -1057,10 +1066,10 @@ static int hebs_write_raw_row(
 		(unsigned long long)plan_fingerprint,
 		(unsigned int)logic_crc32,
 		(unsigned long long)probes->input_apply,
-		(unsigned long long)probes->input_toggle,
+		(unsigned long long)probe_input_toggle,
 		(unsigned long long)probes->chunk_exec,
 		(unsigned long long)probes->gate_eval,
-		(unsigned long long)probes->state_change_commit,
+		(unsigned long long)probe_state_change_commit,
 		(unsigned long long)probes->dff_exec,
 		plan_metadata->num_primary_inputs,
 		plan_metadata->gate_count,
@@ -1068,7 +1077,7 @@ static int hebs_write_raw_row(
 		plan_metadata->propagation_depth,
 		plan_metadata->fanout_max,
 		plan_metadata->total_fanout_edges,
-		(unsigned int)HEBS_COMPAT_PROBES_ENABLED);
+		(unsigned int)HEBS_RUNNER_COMPAT_METRICS_ENABLED);
 
 	return (ferror(csv_file) == 0);
 
@@ -1094,11 +1103,22 @@ static int hebs_write_trace_row(
 	const hebs_probes* probes,
 	const hebs_plan_metadata* plan_metadata)
 {
+	uint64_t probe_input_toggle;
+	uint64_t probe_state_change_commit;
+
 	if (!csv_file || !run_id || !revision || !date_text || !time_text || !git_hash || !suite || !bench || !mode || !probes || !plan_metadata)
 	{
 		return 0;
 
 	}
+
+#if defined(HEBS_TEST_PROBES) && HEBS_TEST_PROBES
+	probe_input_toggle = probes->input_toggle;
+	probe_state_change_commit = probes->state_change_commit;
+#else
+	probe_input_toggle = 0ULL;
+	probe_state_change_commit = 0ULL;
+#endif
 
 	fprintf(
 		csv_file,
@@ -1119,12 +1139,12 @@ static int hebs_write_trace_row(
 		(unsigned long long)plan_fingerprint,
 		(unsigned int)logic_crc32,
 		(unsigned long long)probes->input_apply,
-		(unsigned long long)probes->input_toggle,
+		(unsigned long long)probe_input_toggle,
 		(unsigned long long)probes->chunk_exec,
 		(unsigned long long)probes->gate_eval,
-		(unsigned long long)probes->state_change_commit,
+		(unsigned long long)probe_state_change_commit,
 		(unsigned long long)probes->dff_exec,
-		(unsigned int)HEBS_COMPAT_PROBES_ENABLED,
+		(unsigned int)HEBS_RUNNER_COMPAT_METRICS_ENABLED,
 		plan_metadata->num_primary_inputs,
 		plan_metadata->gate_count,
 		plan_metadata->signal_count);
@@ -1235,7 +1255,7 @@ static int hebs_run_single_bench(
 						git_hash,
 						target->suite_name,
 						target->bench_file,
-						hebs_probe_profile_name(),
+						HEBS_RUNNER_PROFILE_NAME,
 						iter + 1U,
 						opts->iterations,
 						cycle_index,
@@ -1281,7 +1301,7 @@ static int hebs_run_single_bench(
 				git_hash,
 				target->suite_name,
 				target->bench_file,
-				hebs_probe_profile_name(),
+				HEBS_RUNNER_PROFILE_NAME,
 				iter + 1U,
 				opts->iterations,
 				opts->cycles,
@@ -1348,7 +1368,7 @@ int main(int argc, char** argv)
 
 	hebs_get_run_clock(timestamp, sizeof(timestamp), date_text, sizeof(date_text));
 	hebs_get_git_commit_hash(git_hash, sizeof(git_hash));
-	snprintf(run_id, sizeof(run_id), "%s|%s|%s|%s|%s", REVISION_NAME, date_text, timestamp, git_hash, hebs_probe_profile_name());
+	snprintf(run_id, sizeof(run_id), "%s|%s|%s|%s|%s", REVISION_NAME, date_text, timestamp, git_hash, HEBS_RUNNER_PROFILE_NAME);
 
 	hebs_warmup(options.warmup_seconds);
 

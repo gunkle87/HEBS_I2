@@ -2,10 +2,11 @@
 #define HEBS_ENGINE_H
 
 #include <stdint.h>
-#include "hebs_probe_profile.h"
+#include "hebs_types.h"
 
 #define HEBS_MAX_PRIMARY_INPUTS 4096
 #define HEBS_MAX_SIGNAL_TRAYS 4096
+#define HEBS_MAX_SIGNALS (HEBS_MAX_SIGNAL_TRAYS * 32U)
 #ifndef HEBS_BATCH_GATE_CHUNK
 #define HEBS_BATCH_GATE_CHUNK 64U
 #endif
@@ -122,17 +123,6 @@ typedef struct hebs_plan_s
 
 } hebs_plan;
 
-typedef struct hebs_probes_s
-{
-	uint64_t input_apply;
-	uint64_t input_toggle;
-	uint64_t chunk_exec;
-	uint64_t gate_eval;
-	uint64_t state_change_commit;
-	uint64_t dff_exec;
-
-} hebs_probes;
-
 typedef struct hebs_plan_metadata_s
 {
 	uint64_t plan_hash;
@@ -158,7 +148,7 @@ typedef struct hebs_run_status_s
 	uint64_t cycles_executed;
 	uint64_t vectors_applied;
 	uint32_t tray_count;
-	uint8_t compat_metrics_enabled;
+	uint8_t test_probes_enabled;
 
 } hebs_run_status;
 
@@ -166,9 +156,15 @@ typedef struct hebs_engine_s
 {
 	uint64_t current_tick;
 	uint32_t tray_count;
+	uint32_t net_count;
 	HEBS_ALIGN64 uint64_t tray_plane_a[HEBS_MAX_SIGNAL_TRAYS];
 	HEBS_ALIGN64 uint64_t tray_plane_b[HEBS_MAX_SIGNAL_TRAYS];
 	HEBS_ALIGN64 uint64_t dff_state_trays[HEBS_MAX_SIGNAL_TRAYS];
+	HEBS_ALIGN64 uint8_t net_physical[HEBS_MAX_SIGNALS];
+	HEBS_ALIGN64 uint8_t net_mailbox[HEBS_MAX_SIGNALS];
+	uint32_t dirty_net_ids[HEBS_MAX_SIGNALS];
+	uint8_t dirty_net_flags[HEBS_MAX_SIGNALS];
+	uint32_t dirty_count;
 	uint64_t* signal_trays;
 	uint64_t* next_signal_trays;
 	uint64_t cycles_executed;
@@ -195,6 +191,7 @@ uint32_t hebs_get_final_crc32(const hebs_engine* ctx);
 uint64_t hebs_get_plan_hash(const hebs_plan* plan);
 int hebs_get_plan_metadata(const hebs_plan* plan, hebs_plan_metadata* out_metadata);
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value);
+uint8_t hebs_get_primary_input_state(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);
 hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);
 const uint64_t* hebs_get_signal_tray(const hebs_engine* ctx, uint32_t tray_index);
 
