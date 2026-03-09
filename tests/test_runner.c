@@ -89,6 +89,186 @@ static uint8_t read_net_xflag(const hebs_engine* engine, uint32_t net_id)
 
 }
 
+static uint8_t read_net_3bn(const hebs_engine* engine, uint32_t net_id)
+{
+	return (uint8_t)(engine->net_physical[net_id] & 0x7U);
+
+}
+
+typedef enum hebs_proof_drive_kind_e
+{
+	HEBS_PROOF_DRIVE_NONE = 0,
+	HEBS_PROOF_DRIVE_S1 = 1,
+	HEBS_PROOF_DRIVE_S0 = 2,
+	HEBS_PROOF_DRIVE_SX = 3,
+	HEBS_PROOF_DRIVE_W1 = 4,
+	HEBS_PROOF_DRIVE_W0 = 5,
+	HEBS_PROOF_DRIVE_WX = 6,
+	HEBS_PROOF_DRIVE_KIND_COUNT = 7
+
+} hebs_proof_drive_kind_t;
+
+#define HEBS_PROOF_STATE_Z 0U
+#define HEBS_PROOF_STATE_S1 1U
+#define HEBS_PROOF_STATE_S0 2U
+#define HEBS_PROOF_STATE_X 3U
+#define HEBS_PROOF_STATE_W1 4U
+#define HEBS_PROOF_STATE_W0 5U
+#define HEBS_PROOF_STATE_WX 6U
+#define HEBS_PROOF_STATE_SX 7U
+
+static const uint8_t HEBS_PROOF_FUSED_LUT[16] =
+{
+	0x00U, 0x05U, 0x24U, 0x46U,
+	0x02U, 0x02U, 0x02U, 0x02U,
+	0x21U, 0x21U, 0x21U, 0x21U,
+	0x47U, 0x47U, 0x47U, 0x47U
+};
+
+static uint8_t hebs_proof_drive_to_nibble(hebs_proof_drive_kind_t drive_kind)
+{
+	switch (drive_kind)
+	{
+		case HEBS_PROOF_DRIVE_NONE:
+			return 0U;
+		case HEBS_PROOF_DRIVE_S1:
+			return 0x8U;
+		case HEBS_PROOF_DRIVE_S0:
+			return 0x4U;
+		case HEBS_PROOF_DRIVE_SX:
+			return 0xCU;
+		case HEBS_PROOF_DRIVE_W1:
+			return 0x2U;
+		case HEBS_PROOF_DRIVE_W0:
+			return 0x1U;
+		case HEBS_PROOF_DRIVE_WX:
+		default:
+			return 0x3U;
+
+	}
+
+}
+
+static uint8_t hebs_proof_resolve_mailbox_state(uint8_t mailbox)
+{
+	return (uint8_t)(HEBS_PROOF_FUSED_LUT[mailbox & 0x0FU] & 0x07U);
+
+}
+
+static uint8_t hebs_proof_build_accum_lut(uint8_t accum_lut[8][HEBS_PROOF_DRIVE_KIND_COUNT])
+{
+	uint8_t pending_state;
+	uint8_t saw_non_materialized_state = 0U;
+
+	for (pending_state = 0U; pending_state < 8U; ++pending_state)
+	{
+		uint8_t drive_kind;
+		uint8_t representative_count = 0U;
+
+		for (drive_kind = 0U; drive_kind < HEBS_PROOF_DRIVE_KIND_COUNT; ++drive_kind)
+		{
+			const uint8_t drive_nibble = hebs_proof_drive_to_nibble((hebs_proof_drive_kind_t)drive_kind);
+			uint8_t mailbox;
+			uint8_t saw_candidate = 0U;
+			uint8_t next_state = 0xFFU;
+
+			for (mailbox = 0U; mailbox < 16U; ++mailbox)
+			{
+				if (hebs_proof_resolve_mailbox_state(mailbox) != pending_state)
+				{
+					continue;
+
+				}
+
+				representative_count += (uint8_t)(drive_kind == 0U);
+				if (saw_candidate == 0U)
+				{
+					next_state = hebs_proof_resolve_mailbox_state((uint8_t)(mailbox | drive_nibble));
+					saw_candidate = 1U;
+
+				}
+				else
+				{
+					assert(next_state == hebs_proof_resolve_mailbox_state((uint8_t)(mailbox | drive_nibble)));
+
+				}
+
+			}
+
+			if (saw_candidate != 0U)
+			{
+				accum_lut[pending_state][drive_kind] = next_state;
+				continue;
+
+			}
+
+			/* HEBS_STATE_X is externally seedable, but the fused LUT never materializes it. */
+			assert(pending_state == HEBS_PROOF_STATE_X);
+			saw_non_materialized_state = 1U;
+			accum_lut[pending_state][drive_kind] = (drive_nibble == 0U) ? HEBS_PROOF_STATE_X : hebs_proof_resolve_mailbox_state(drive_nibble);
+
+		}
+
+		if (pending_state == HEBS_PROOF_STATE_X)
+		{
+			assert(representative_count == 0U);
+
+		}
+		else
+		{
+			assert(representative_count > 0U);
+
+		}
+
+	}
+
+	return saw_non_materialized_state;
+
+}
+
+static uint8_t hebs_proof_fold_candidate(
+	const uint8_t accum_lut[8][HEBS_PROOF_DRIVE_KIND_COUNT],
+	uint8_t initial_state,
+	const hebs_proof_drive_kind_t* drives,
+	uint32_t drive_count)
+{
+	uint32_t idx;
+	uint8_t state = initial_state;
+
+	for (idx = 0U; idx < drive_count; ++idx)
+	{
+		state = accum_lut[state][drives[idx]];
+
+	}
+
+	return state;
+
+}
+
+static uint8_t hebs_proof_fold_mailbox(const hebs_proof_drive_kind_t* drives, uint32_t drive_count)
+{
+	uint32_t idx;
+	uint8_t mailbox = 0U;
+
+	for (idx = 0U; idx < drive_count; ++idx)
+	{
+		mailbox = (uint8_t)(mailbox | hebs_proof_drive_to_nibble(drives[idx]));
+
+	}
+
+	return hebs_proof_resolve_mailbox_state(mailbox);
+
+}
+
+static void hebs_proof_expect_sequence_match(
+	const uint8_t accum_lut[8][HEBS_PROOF_DRIVE_KIND_COUNT],
+	const hebs_proof_drive_kind_t* drives,
+	uint32_t drive_count)
+{
+	assert(hebs_proof_fold_candidate(accum_lut, HEBS_PROOF_STATE_Z, drives, drive_count) == hebs_proof_fold_mailbox(drives, drive_count));
+
+}
+
 static hebs_plan* load_temp_bench_plan(const char* path, const char* bench_text)
 {
 	FILE* file = fopen(path, "wb");
@@ -955,6 +1135,372 @@ static void test_parallel_dff_tray_commit(void)
 
 }
 
+static void test_pending_state_accumulator_closure_proof(void)
+{
+	uint8_t accum_lut[8][HEBS_PROOF_DRIVE_KIND_COUNT];
+	uint8_t pending_state;
+	uint8_t saw_non_materialized_state;
+	static const hebs_proof_drive_kind_t seq_s1_w0[2] =
+	{
+		HEBS_PROOF_DRIVE_S1,
+		HEBS_PROOF_DRIVE_W0
+	};
+	static const hebs_proof_drive_kind_t seq_w1_w0[2] =
+	{
+		HEBS_PROOF_DRIVE_W1,
+		HEBS_PROOF_DRIVE_W0
+	};
+	static const hebs_proof_drive_kind_t seq_s1_sx[2] =
+	{
+		HEBS_PROOF_DRIVE_S1,
+		HEBS_PROOF_DRIVE_SX
+	};
+	static const hebs_proof_drive_kind_t seq_w1_sx[2] =
+	{
+		HEBS_PROOF_DRIVE_W1,
+		HEBS_PROOF_DRIVE_SX
+	};
+	static const hebs_proof_drive_kind_t seq_none_strong[2] =
+	{
+		HEBS_PROOF_DRIVE_NONE,
+		HEBS_PROOF_DRIVE_S1
+	};
+	static const hebs_proof_drive_kind_t seq_duplicate_s1[2] =
+	{
+		HEBS_PROOF_DRIVE_S1,
+		HEBS_PROOF_DRIVE_S1
+	};
+	static const hebs_proof_drive_kind_t seq_tri_disabled[2] =
+	{
+		HEBS_PROOF_DRIVE_NONE,
+		HEBS_PROOF_DRIVE_W1
+	};
+
+	saw_non_materialized_state = hebs_proof_build_accum_lut(accum_lut);
+	assert(saw_non_materialized_state == 1U);
+
+	for (pending_state = 0U; pending_state < 8U; ++pending_state)
+	{
+		uint8_t drive_kind;
+
+		for (drive_kind = 0U; drive_kind < HEBS_PROOF_DRIVE_KIND_COUNT; ++drive_kind)
+		{
+			const uint8_t drive_nibble = hebs_proof_drive_to_nibble((hebs_proof_drive_kind_t)drive_kind);
+			uint8_t mailbox;
+			uint8_t saw_representative = 0U;
+
+			for (mailbox = 0U; mailbox < 16U; ++mailbox)
+			{
+				if (hebs_proof_resolve_mailbox_state(mailbox) != pending_state)
+				{
+					continue;
+
+				}
+
+				assert(accum_lut[pending_state][drive_kind] == hebs_proof_resolve_mailbox_state((uint8_t)(mailbox | drive_nibble)));
+				saw_representative = 1U;
+
+			}
+
+			if (pending_state == HEBS_PROOF_STATE_X)
+			{
+				assert(saw_representative == 0U);
+				if (drive_kind == HEBS_PROOF_DRIVE_NONE)
+				{
+					assert(accum_lut[pending_state][drive_kind] == HEBS_PROOF_STATE_X);
+
+				}
+				else
+				{
+					assert(accum_lut[pending_state][drive_kind] == hebs_proof_resolve_mailbox_state(drive_nibble));
+
+				}
+
+			}
+			else
+			{
+				assert(saw_representative == 1U);
+
+			}
+
+		}
+
+	}
+
+	hebs_proof_expect_sequence_match(accum_lut, seq_s1_w0, 2U);
+	hebs_proof_expect_sequence_match(accum_lut, seq_w1_w0, 2U);
+	hebs_proof_expect_sequence_match(accum_lut, seq_s1_sx, 2U);
+	hebs_proof_expect_sequence_match(accum_lut, seq_w1_sx, 2U);
+	hebs_proof_expect_sequence_match(accum_lut, seq_none_strong, 2U);
+	hebs_proof_expect_sequence_match(accum_lut, seq_duplicate_s1, 2U);
+	hebs_proof_expect_sequence_match(accum_lut, seq_tri_disabled, 2U);
+
+	assert(accum_lut[HEBS_PROOF_STATE_Z][HEBS_PROOF_DRIVE_NONE] == HEBS_PROOF_STATE_Z);
+	assert(accum_lut[HEBS_PROOF_STATE_S1][HEBS_PROOF_DRIVE_W0] == HEBS_PROOF_STATE_S1);
+	assert(accum_lut[HEBS_PROOF_STATE_W1][HEBS_PROOF_DRIVE_W0] == HEBS_PROOF_STATE_WX);
+	assert(accum_lut[HEBS_PROOF_STATE_S1][HEBS_PROOF_DRIVE_S0] == HEBS_PROOF_STATE_SX);
+	assert(accum_lut[HEBS_PROOF_STATE_X][HEBS_PROOF_DRIVE_NONE] == HEBS_PROOF_STATE_X);
+	assert(accum_lut[HEBS_PROOF_STATE_X][HEBS_PROOF_DRIVE_S1] == HEBS_PROOF_STATE_S1);
+
+}
+
+static void test_live_pending_accumulator_semantics(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[2] = { 0U, 1U };
+	hebs_lep_instruction_t lep_data[9];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[0].input_count = 0U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(0U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[1].input_count = 0U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(0U);
+	lep_data[1].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[2].gate_type = (uint8_t)HEBS_GATE_GND;
+	lep_data[2].input_count = 0U;
+	lep_data[2].level = 1U;
+	lep_data[2].src_a_bit_offset = net_to_bit(0U);
+	lep_data[2].src_b_bit_offset = net_to_bit(0U);
+	lep_data[2].dst_bit_offset = net_to_bit(3U);
+
+	lep_data[3].gate_type = (uint8_t)HEBS_GATE_PUP;
+	lep_data[3].input_count = 1U;
+	lep_data[3].level = 1U;
+	lep_data[3].src_a_bit_offset = net_to_bit(0U);
+	lep_data[3].src_b_bit_offset = net_to_bit(0U);
+	lep_data[3].dst_bit_offset = net_to_bit(3U);
+
+	lep_data[4].gate_type = (uint8_t)HEBS_GATE_PUP;
+	lep_data[4].input_count = 1U;
+	lep_data[4].level = 1U;
+	lep_data[4].src_a_bit_offset = net_to_bit(0U);
+	lep_data[4].src_b_bit_offset = net_to_bit(0U);
+	lep_data[4].dst_bit_offset = net_to_bit(4U);
+
+	lep_data[5].gate_type = (uint8_t)HEBS_GATE_PDN;
+	lep_data[5].input_count = 1U;
+	lep_data[5].level = 1U;
+	lep_data[5].src_a_bit_offset = net_to_bit(0U);
+	lep_data[5].src_b_bit_offset = net_to_bit(0U);
+	lep_data[5].dst_bit_offset = net_to_bit(4U);
+
+	lep_data[6].gate_type = (uint8_t)HEBS_GATE_TRI;
+	lep_data[6].input_count = 2U;
+	lep_data[6].level = 1U;
+	lep_data[6].src_a_bit_offset = net_to_bit(0U);
+	lep_data[6].src_b_bit_offset = net_to_bit(1U);
+	lep_data[6].dst_bit_offset = net_to_bit(5U);
+
+	lep_data[7].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[7].input_count = 0U;
+	lep_data[7].level = 1U;
+	lep_data[7].src_a_bit_offset = net_to_bit(0U);
+	lep_data[7].src_b_bit_offset = net_to_bit(0U);
+	lep_data[7].dst_bit_offset = net_to_bit(5U);
+
+	lep_data[8].gate_type = (uint8_t)HEBS_GATE_PUP;
+	lep_data[8].input_count = 1U;
+	lep_data[8].level = 1U;
+	lep_data[8].src_a_bit_offset = net_to_bit(0U);
+	lep_data[8].src_b_bit_offset = net_to_bit(0U);
+	lep_data[8].dst_bit_offset = net_to_bit(6U);
+
+	plan.lep_hash = 11001U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 7U;
+	plan.gate_count = 9U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_Z) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S0) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+
+	assert(read_net_3bn(&engine, 2U) == 1U);
+	assert(read_net_3bn(&engine, 3U) == 2U);
+	assert(read_net_3bn(&engine, 4U) == 6U);
+	assert(read_net_3bn(&engine, 5U) == 1U);
+	assert(read_net_3bn(&engine, 6U) == 4U);
+	assert(read_net_pstate(&engine, 2U) == 0x1U);
+	assert(read_net_pstate(&engine, 3U) == 0x0U);
+	assert(read_net_pstate(&engine, 4U) == 0x2U);
+	assert(read_net_pstate(&engine, 5U) == 0x1U);
+	assert(read_net_pstate(&engine, 6U) == 0x1U);
+
+}
+
+static void test_live_pending_batched_fallback_equivalence(void)
+{
+	hebs_engine fallback_engine = { 0 };
+	hebs_engine batched_engine = { 0 };
+	uint32_t primary_inputs[3] = { 0U, 1U, 2U };
+	hebs_lep_instruction_t lep_data[6];
+	hebs_exec_instruction_t exec_data[6];
+	hebs_gate_span_t spans[6];
+	hebs_plan fallback_plan = { 0 };
+	hebs_plan batched_plan = { 0 };
+	uint32_t idx;
+	uint32_t net_id;
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_AND;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(1U);
+	lep_data[0].dst_bit_offset = net_to_bit(3U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_OR;
+	lep_data[1].input_count = 2U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(1U);
+	lep_data[1].dst_bit_offset = net_to_bit(4U);
+
+	lep_data[2].gate_type = (uint8_t)HEBS_GATE_TRI;
+	lep_data[2].input_count = 2U;
+	lep_data[2].level = 1U;
+	lep_data[2].src_a_bit_offset = net_to_bit(0U);
+	lep_data[2].src_b_bit_offset = net_to_bit(1U);
+	lep_data[2].dst_bit_offset = net_to_bit(5U);
+
+	lep_data[3].gate_type = (uint8_t)HEBS_GATE_PUP;
+	lep_data[3].input_count = 1U;
+	lep_data[3].level = 1U;
+	lep_data[3].src_a_bit_offset = net_to_bit(2U);
+	lep_data[3].src_b_bit_offset = net_to_bit(2U);
+	lep_data[3].dst_bit_offset = net_to_bit(6U);
+
+	lep_data[4].gate_type = (uint8_t)HEBS_GATE_PDN;
+	lep_data[4].input_count = 1U;
+	lep_data[4].level = 1U;
+	lep_data[4].src_a_bit_offset = net_to_bit(2U);
+	lep_data[4].src_b_bit_offset = net_to_bit(2U);
+	lep_data[4].dst_bit_offset = net_to_bit(7U);
+
+	lep_data[5].gate_type = (uint8_t)HEBS_GATE_XOR;
+	lep_data[5].input_count = 2U;
+	lep_data[5].level = 1U;
+	lep_data[5].src_a_bit_offset = net_to_bit(1U);
+	lep_data[5].src_b_bit_offset = net_to_bit(2U);
+	lep_data[5].dst_bit_offset = net_to_bit(8U);
+
+	for (idx = 0U; idx < 6U; ++idx)
+	{
+		exec_data[idx].gate_type = lep_data[idx].gate_type;
+		exec_data[idx].src_a_shift = (uint8_t)(lep_data[idx].src_a_bit_offset & 63U);
+		exec_data[idx].src_b_shift = (uint8_t)(lep_data[idx].src_b_bit_offset & 63U);
+		exec_data[idx].dst_shift = (uint8_t)(lep_data[idx].dst_bit_offset & 63U);
+		exec_data[idx].src_a_tray = lep_data[idx].src_a_bit_offset >> 6U;
+		exec_data[idx].src_b_tray = lep_data[idx].src_b_bit_offset >> 6U;
+		exec_data[idx].dst_tray = lep_data[idx].dst_bit_offset >> 6U;
+		exec_data[idx].dst_mask = 0x3ULL << exec_data[idx].dst_shift;
+		spans[idx].start = idx;
+		spans[idx].count = 1U;
+		spans[idx].gate_type = lep_data[idx].gate_type;
+		spans[idx].reserved0 = 0U;
+		spans[idx].reserved1 = 0U;
+		spans[idx].reserved2 = 0U;
+
+	}
+
+	fallback_plan.lep_hash = 11002U;
+	fallback_plan.level_count = 2U;
+	fallback_plan.num_primary_inputs = 3U;
+	fallback_plan.signal_count = 9U;
+	fallback_plan.gate_count = 6U;
+	fallback_plan.tray_count = 1U;
+	fallback_plan.max_level = 1U;
+	fallback_plan.primary_input_ids = primary_inputs;
+	fallback_plan.lep_data = lep_data;
+
+	batched_plan = fallback_plan;
+	batched_plan.comb_instruction_count = 6U;
+	batched_plan.comb_exec_data = exec_data;
+	batched_plan.comb_span_count = 6U;
+	batched_plan.comb_spans = spans;
+
+	assert(hebs_init_engine(&fallback_engine, &fallback_plan) == HEBS_OK);
+	assert(hebs_init_engine(&batched_engine, &batched_plan) == HEBS_OK);
+
+	assert(hebs_set_primary_input(&fallback_engine, &fallback_plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&fallback_engine, &fallback_plan, 1U, HEBS_SX) == HEBS_OK);
+	assert(hebs_set_primary_input(&fallback_engine, &fallback_plan, 2U, HEBS_Z) == HEBS_OK);
+	assert(hebs_set_primary_input(&batched_engine, &batched_plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&batched_engine, &batched_plan, 1U, HEBS_SX) == HEBS_OK);
+	assert(hebs_set_primary_input(&batched_engine, &batched_plan, 2U, HEBS_Z) == HEBS_OK);
+	hebs_tick(&fallback_engine, &fallback_plan);
+	hebs_tick(&batched_engine, &batched_plan);
+
+	assert(hebs_set_primary_input(&fallback_engine, &fallback_plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&fallback_engine, &fallback_plan, 1U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&fallback_engine, &fallback_plan, 2U, HEBS_Z) == HEBS_OK);
+	assert(hebs_set_primary_input(&batched_engine, &batched_plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&batched_engine, &batched_plan, 1U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&batched_engine, &batched_plan, 2U, HEBS_Z) == HEBS_OK);
+	hebs_tick(&fallback_engine, &fallback_plan);
+	hebs_tick(&batched_engine, &batched_plan);
+
+	for (net_id = 0U; net_id < fallback_plan.signal_count; ++net_id)
+	{
+		assert(read_net_3bn(&fallback_engine, net_id) == read_net_3bn(&batched_engine, net_id));
+		assert(read_net_pstate(&fallback_engine, net_id) == read_net_pstate(&batched_engine, net_id));
+
+	}
+
+}
+
+static void test_live_pending_dff_deferred_visibility(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_exec_instruction_t dff_exec_data[1];
+	hebs_plan plan = { 0 };
+
+	dff_exec_data[0].gate_type = (uint8_t)HEBS_GATE_DFF;
+	dff_exec_data[0].src_a_shift = 0U;
+	dff_exec_data[0].src_b_shift = 0U;
+	dff_exec_data[0].dst_shift = 2U;
+	dff_exec_data[0].src_a_tray = 0U;
+	dff_exec_data[0].src_b_tray = 0U;
+	dff_exec_data[0].dst_tray = 0U;
+	dff_exec_data[0].dst_mask = 0x3ULL << 2U;
+
+	plan.lep_hash = 11003U;
+	plan.level_count = 1U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 2U;
+	plan.gate_count = 0U;
+	plan.tray_count = 1U;
+	plan.max_level = 0U;
+	plan.primary_input_ids = primary_inputs;
+	plan.dff_exec_count = 1U;
+	plan.dff_exec_data = dff_exec_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(read_net_3bn(&engine, 1U) == 0U);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	assert(read_net_3bn(&engine, 1U) == 0U);
+	assert(read_net_pstate(&engine, 1U) == 0x0U);
+	hebs_tick(&engine, &plan);
+	assert(read_net_3bn(&engine, 1U) == 1U);
+	assert(read_net_pstate(&engine, 1U) == 0x1U);
+
+}
+
 static void test_protocol_helper_stats(void)
 {
 	double values[5] = { 5.0, 1.0, 3.0, 4.0, 2.0 };
@@ -1273,6 +1819,10 @@ int main(void)
 	assert(HEBS_S1 == 1);
 	assert(HEBS_WX == 7);
 	test_loader_contract_from_s27();
+	test_pending_state_accumulator_closure_proof();
+	test_live_pending_accumulator_semantics();
+	test_live_pending_batched_fallback_equivalence();
+	test_live_pending_dff_deferred_visibility();
 	test_phase3_strength_precedence_strong_over_weak();
 	test_and_or_dominance_x_suppression();
 	test_and_nand_x_dominance();

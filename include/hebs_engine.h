@@ -162,7 +162,7 @@ typedef struct hebs_engine_s
 	HEBS_ALIGN64 uint64_t tray_plane_b[HEBS_MAX_SIGNAL_TRAYS];
 	HEBS_ALIGN64 uint64_t dff_state_trays[HEBS_MAX_SIGNAL_TRAYS];
 	HEBS_ALIGN64 uint8_t net_physical[HEBS_MAX_SIGNALS];
-	HEBS_ALIGN64 uint8_t net_mailbox[HEBS_MAX_SIGNALS];
+	HEBS_ALIGN64 uint8_t pending_state[HEBS_MAX_SIGNALS];
 	uint32_t dirty_net_ids[HEBS_MAX_SIGNALS];
 	uint8_t dirty_net_flags[HEBS_MAX_SIGNALS];
 	uint32_t dirty_count;

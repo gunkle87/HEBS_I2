@@ -10,14 +10,34 @@
 #define HEBS_STATE_WX 6U
 #define HEBS_STATE_SX 7U
 
-/* Index (4Bi): [SH, SL, WH, WL]
-   Packing: bit6=X, bit5=Logic, bits2:0=3Bn */
-static const uint8_t HEBS_FUSED_LUT[16] =
+typedef enum hebs_drive_kind_e
 {
-	0x00U, 0x05U, 0x24U, 0x46U,
-	0x02U, 0x02U, 0x02U, 0x02U,
-	0x21U, 0x21U, 0x21U, 0x21U,
-	0x47U, 0x47U, 0x47U, 0x47U
+	HEBS_DRIVE_NONE = 0,
+	HEBS_DRIVE_S1 = 1,
+	HEBS_DRIVE_S0 = 2,
+	HEBS_DRIVE_SX = 3,
+	HEBS_DRIVE_W1 = 4,
+	HEBS_DRIVE_W0 = 5,
+	HEBS_DRIVE_WX = 6
+
+} hebs_drive_kind_t;
+
+static const uint8_t HEBS_RESOLVE_ACCUM_LUT[8][7] =
+{
+	{ HEBS_STATE_Z, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX },
+	{ HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_S1 },
+	{ HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_S0, HEBS_STATE_S0, HEBS_STATE_S0 },
+	{ HEBS_STATE_X, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX },
+	{ HEBS_STATE_W1, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_WX, HEBS_STATE_WX },
+	{ HEBS_STATE_W0, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_WX, HEBS_STATE_W0, HEBS_STATE_WX },
+	{ HEBS_STATE_WX, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_WX, HEBS_STATE_WX, HEBS_STATE_WX },
+	{ HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX }
+};
+
+static const uint8_t HEBS_STATE_TO_PSTATE[8] =
+{
+	0x0U, 0x1U, 0x0U, 0x2U,
+	0x1U, 0x0U, 0x2U, 0x2U
 };
 
 static uint32_t hebs_net_id_from_tray_shift(uint32_t tray_idx, uint8_t tray_shift)
@@ -61,47 +81,51 @@ static void hebs_write_pstate_net(hebs_engine* ctx, uint32_t net_id, uint8_t pst
 
 }
 
-static void hebs_mailbox_or(hebs_engine* ctx, uint32_t net_id, uint8_t nibble)
-{
-	const uint8_t drive_nibble = (uint8_t)(nibble & 0x0FU);
-	const uint8_t old_mailbox = ctx->net_mailbox[net_id];
-	const uint8_t merged_mailbox = (uint8_t)(old_mailbox | drive_nibble);
-
-	if (drive_nibble == 0U)
-	{
-		return;
-
-	}
-
-	if (old_mailbox == 0U)
-	{
-		/* Mailbox zero is the first-touch invariant for dirty-list insertion. */
-		ctx->net_mailbox[net_id] = drive_nibble;
-		ctx->dirty_net_ids[ctx->dirty_count++] = net_id;
-		return;
-
-	}
-
-	if (merged_mailbox == old_mailbox)
-	{
-		return;
-
-	}
-
-	ctx->net_mailbox[net_id] = merged_mailbox;
-
-}
-
-static uint8_t hebs_make_drive_nibble(uint8_t logic_bit, uint8_t x_flag, uint8_t strong_drive)
+static uint8_t hebs_make_drive_kind(uint8_t logic_bit, uint8_t x_flag, uint8_t strong_drive)
 {
 	const uint8_t logic = (uint8_t)(logic_bit & 1U);
 	const uint8_t x = (uint8_t)(x_flag & 1U);
 	const uint8_t strong = (uint8_t)(strong_drive & 1U);
-	const uint8_t base = (uint8_t)(1U + (strong * 3U));
-	const uint8_t high = (uint8_t)(base << 1U);
-	const uint8_t x_mix = (uint8_t)(base | high);
-	const uint8_t value_mix = (uint8_t)(base + (logic * base));
-	return (uint8_t)((x * x_mix) + ((1U - x) * value_mix));
+
+	if (x != 0U)
+	{
+		return (strong != 0U) ? HEBS_DRIVE_SX : HEBS_DRIVE_WX;
+
+	}
+
+	if (strong != 0U)
+	{
+		return (logic != 0U) ? HEBS_DRIVE_S1 : HEBS_DRIVE_S0;
+
+	}
+
+	return (logic != 0U) ? HEBS_DRIVE_W1 : HEBS_DRIVE_W0;
+
+}
+
+static void hebs_accumulate_drive(hebs_engine* ctx, uint32_t net_id, uint8_t drive_kind)
+{
+	if ((drive_kind & 0x7U) == HEBS_DRIVE_NONE)
+	{
+		return;
+
+	}
+
+	if (ctx->dirty_net_flags[net_id] == 0U)
+	{
+		ctx->dirty_net_flags[net_id] = 1U;
+		ctx->dirty_net_ids[ctx->dirty_count++] = net_id;
+		ctx->pending_state[net_id] = HEBS_STATE_Z;
+
+	}
+
+	ctx->pending_state[net_id] = HEBS_RESOLVE_ACCUM_LUT[ctx->pending_state[net_id] & 0x7U][drive_kind & 0x7U];
+
+}
+
+static void hebs_accumulate_logic_drive(hebs_engine* ctx, uint32_t net_id, uint8_t logic_bit, uint8_t x_flag, uint8_t strong_drive)
+{
+	hebs_accumulate_drive(ctx, net_id, hebs_make_drive_kind(logic_bit, x_flag, strong_drive));
 
 }
 
@@ -150,22 +174,7 @@ static hebs_logic_t hebs_physical_to_logic(uint8_t state_3bn)
 
 static uint8_t hebs_physical_to_pstate(uint8_t state_3bn)
 {
-	switch (state_3bn & 0x7U)
-	{
-		case HEBS_STATE_S1:
-		case HEBS_STATE_W1:
-			return 0x1U;
-		case HEBS_STATE_X:
-		case HEBS_STATE_WX:
-		case HEBS_STATE_SX:
-			return 0x2U;
-		case HEBS_STATE_Z:
-		case HEBS_STATE_S0:
-		case HEBS_STATE_W0:
-		default:
-			return 0x0U;
-
-	}
+	return HEBS_STATE_TO_PSTATE[state_3bn & 0x7U];
 
 }
 
@@ -221,7 +230,6 @@ static void hebs_execute_and_span(
 		uint8_t b_x;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -239,9 +247,7 @@ static void hebs_execute_and_span(
 		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
 		out_l = (uint8_t)(a_l & b_l);
 		out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -270,7 +276,6 @@ static void hebs_execute_or_span(
 		uint8_t b_x;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -288,9 +293,7 @@ static void hebs_execute_or_span(
 		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
 		out_l = (uint8_t)(a_l | b_l);
 		out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -319,7 +322,6 @@ static void hebs_execute_xor_span(
 		uint8_t b_x;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -337,9 +339,7 @@ static void hebs_execute_xor_span(
 		b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
 		out_l = (uint8_t)(a_l ^ b_l);
 		out_x = (uint8_t)(a_x | b_x);
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -369,7 +369,6 @@ static void hebs_execute_nand_span(
 		uint8_t tmp_l;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -388,9 +387,7 @@ static void hebs_execute_nand_span(
 		tmp_l = (uint8_t)(a_l & b_l);
 		out_l = (uint8_t)(tmp_l ^ 1U);
 		out_x = (uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l));
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -420,7 +417,6 @@ static void hebs_execute_nor_span(
 		uint8_t tmp_l;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -439,9 +435,7 @@ static void hebs_execute_nor_span(
 		tmp_l = (uint8_t)(a_l | b_l);
 		out_l = (uint8_t)(tmp_l ^ 1U);
 		out_x = (uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U));
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -465,7 +459,6 @@ static void hebs_execute_not_span(
 		uint8_t a_x;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
@@ -479,9 +472,7 @@ static void hebs_execute_not_span(
 		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
 		out_l = (uint8_t)(a_l ^ 1U);
 		out_x = a_x;
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -505,7 +496,6 @@ static void hebs_execute_buf_span(
 		uint8_t a_x;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
 		{
@@ -519,9 +509,7 @@ static void hebs_execute_buf_span(
 		a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
 		out_l = a_l;
 		out_x = a_x;
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -551,7 +539,6 @@ static void hebs_execute_xnor_span(
 		uint8_t tmp_l;
 		uint8_t out_l;
 		uint8_t out_x;
-		uint8_t drive_nibble;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -570,9 +557,7 @@ static void hebs_execute_xnor_span(
 		tmp_l = (uint8_t)(a_l ^ b_l);
 		out_l = (uint8_t)(tmp_l ^ 1U);
 		out_x = (uint8_t)(a_x | b_x);
-		drive_nibble = hebs_make_drive_nibble(out_l, out_x, 1U);
-
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 1U);
 
 	}
 
@@ -589,7 +574,6 @@ static void hebs_execute_vcc_span(
 	{
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
-		const uint8_t drive_nibble = 0x8U;
 
 		if (dst_net_id >= ctx->net_count)
 		{
@@ -597,7 +581,7 @@ static void hebs_execute_vcc_span(
 
 		}
 
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_drive(ctx, dst_net_id, HEBS_DRIVE_S1);
 
 	}
 
@@ -614,7 +598,6 @@ static void hebs_execute_gnd_span(
 	{
 		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
-		const uint8_t drive_nibble = 0x4U;
 
 		if (dst_net_id >= ctx->net_count)
 		{
@@ -622,7 +605,7 @@ static void hebs_execute_gnd_span(
 
 		}
 
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_drive(ctx, dst_net_id, HEBS_DRIVE_S0);
 
 	}
 
@@ -660,8 +643,7 @@ static void hebs_execute_pup_span(
 			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
 			const uint8_t out_x = a_x;
 			const uint8_t out_l = (uint8_t)((a_l | src_is_z) & (uint8_t)(a_x ^ 1U));
-			const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 0U);
-			hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+			hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 0U);
 
 		}
 
@@ -701,8 +683,7 @@ static void hebs_execute_pdn_span(
 			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
 			const uint8_t out_x = a_x;
 			const uint8_t out_l = (uint8_t)((a_l & (uint8_t)(src_is_z ^ 1U)) & (uint8_t)(a_x ^ 1U));
-			const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 0U);
-			hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+			hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 0U);
 
 		}
 
@@ -737,8 +718,7 @@ static void hebs_execute_tri_span(
 		uint8_t m_high;
 		uint8_t m_x;
 		uint8_t data_drive;
-		const uint8_t x_drive = 0xCU;
-		uint8_t drive_nibble;
+		uint8_t drive_kind;
 
 		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count || src_b_net_id >= ctx->net_count)
 		{
@@ -759,10 +739,10 @@ static void hebs_execute_tri_span(
 		en_x = b_x;
 		m_high = (uint8_t)(0U - en_high);
 		m_x = (uint8_t)(0U - en_x);
-		data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
-		drive_nibble = (uint8_t)((m_high & data_drive) | (m_x & x_drive));
+		data_drive = hebs_make_drive_kind(a_l, a_x, 1U);
+		drive_kind = (uint8_t)((m_high & data_drive) | (m_x & HEBS_DRIVE_SX));
 
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_drive(ctx, dst_net_id, drive_kind);
 
 	}
 
@@ -847,7 +827,7 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 		uint8_t a_x = 0U;
 		uint8_t b_l = 0U;
 		uint8_t b_x = 0U;
-		uint8_t drive_nibble = 0xCU;
+		uint8_t drive_kind = HEBS_DRIVE_SX;
 
 		if (gate_type == HEBS_GATE_DFF)
 		{
@@ -894,40 +874,40 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 		switch (gate_type)
 		{
 			case HEBS_GATE_AND:
-				drive_nibble = hebs_make_drive_nibble(
+				drive_kind = hebs_make_drive_kind(
 					(uint8_t)(a_l & b_l),
 					(uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l)),
 					1U);
 				break;
 			case HEBS_GATE_OR:
-				drive_nibble = hebs_make_drive_nibble(
+				drive_kind = hebs_make_drive_kind(
 					(uint8_t)(a_l | b_l),
 					(uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U)),
 					1U);
 				break;
 			case HEBS_GATE_XOR:
-				drive_nibble = hebs_make_drive_nibble((uint8_t)(a_l ^ b_l), (uint8_t)(a_x | b_x), 1U);
+				drive_kind = hebs_make_drive_kind((uint8_t)(a_l ^ b_l), (uint8_t)(a_x | b_x), 1U);
 				break;
 			case HEBS_GATE_NOT:
-				drive_nibble = hebs_make_drive_nibble((uint8_t)(a_l ^ 1U), a_x, 1U);
+				drive_kind = hebs_make_drive_kind((uint8_t)(a_l ^ 1U), a_x, 1U);
 				break;
 			case HEBS_GATE_NAND:
-				drive_nibble = hebs_make_drive_nibble(
+				drive_kind = hebs_make_drive_kind(
 					(uint8_t)((a_l & b_l) ^ 1U),
 					(uint8_t)((a_x | b_x) & (a_x | a_l) & (b_x | b_l)),
 					1U);
 				break;
 			case HEBS_GATE_NOR:
-				drive_nibble = hebs_make_drive_nibble(
+				drive_kind = hebs_make_drive_kind(
 					(uint8_t)((a_l | b_l) ^ 1U),
 					(uint8_t)((a_x | b_x) & (uint8_t)(a_l ^ 1U) & (uint8_t)(b_l ^ 1U)),
 					1U);
 				break;
 			case HEBS_GATE_XNOR:
-				drive_nibble = hebs_make_drive_nibble((uint8_t)((a_l ^ b_l) ^ 1U), (uint8_t)(a_x | b_x), 1U);
+				drive_kind = hebs_make_drive_kind((uint8_t)((a_l ^ b_l) ^ 1U), (uint8_t)(a_x | b_x), 1U);
 				break;
 			case HEBS_GATE_BUF:
-				drive_nibble = hebs_make_drive_nibble(a_l, a_x, 1U);
+				drive_kind = hebs_make_drive_kind(a_l, a_x, 1U);
 				break;
 			case HEBS_GATE_TRI:
 			{
@@ -936,35 +916,35 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 				const uint8_t en_x = b_x;
 				const uint8_t m_high = (uint8_t)(0U - en_high);
 				const uint8_t m_x = (uint8_t)(0U - en_x);
-				const uint8_t data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
-				drive_nibble = (uint8_t)((m_high & data_drive) | (m_x & 0xCU));
+				const uint8_t data_drive = hebs_make_drive_kind(a_l, a_x, 1U);
+				drive_kind = (uint8_t)((m_high & data_drive) | (m_x & HEBS_DRIVE_SX));
 				break;
 			}
 			case HEBS_GATE_VCC:
-				drive_nibble = 0x8U;
+				drive_kind = HEBS_DRIVE_S1;
 				break;
 			case HEBS_GATE_GND:
-				drive_nibble = 0x4U;
+				drive_kind = HEBS_DRIVE_S0;
 				break;
 			case HEBS_GATE_PUP:
-				drive_nibble = hebs_make_drive_nibble(
+				drive_kind = hebs_make_drive_kind(
 					(uint8_t)((a_l | (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z)) & (uint8_t)(a_x ^ 1U)),
 					a_x,
 					0U);
 				break;
 			case HEBS_GATE_PDN:
-				drive_nibble = hebs_make_drive_nibble(
+				drive_kind = hebs_make_drive_kind(
 					(uint8_t)((a_l & (uint8_t)(((uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z)) ^ 1U)) & (uint8_t)(a_x ^ 1U)),
 					a_x,
 					0U);
 				break;
 			default:
-				drive_nibble = 0xCU;
+				drive_kind = HEBS_DRIVE_SX;
 				break;
 
 		}
 
-		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+		hebs_accumulate_drive(ctx, dst_net_id, drive_kind);
 
 	}
 
@@ -983,26 +963,23 @@ static void hebs_phase_evaluate(hebs_engine* ctx, const hebs_plan* plan)
 
 }
 
-static void hebs_phase_resolve(hebs_engine* ctx)
+static void hebs_phase_materialize_pending(hebs_engine* ctx)
 {
 	uint32_t dirty_idx;
-	uint8_t* const net_mailbox = ctx->net_mailbox;
 	uint8_t* const net_physical = ctx->net_physical;
 
 	for (dirty_idx = 0U; dirty_idx < ctx->dirty_count; ++dirty_idx)
 	{
 		const uint32_t net_id = ctx->dirty_net_ids[dirty_idx];
-		const uint8_t old_mailbox = net_mailbox[net_id];
-		const uint8_t lut_value = HEBS_FUSED_LUT[old_mailbox];
-		const uint8_t resolved_3bn = (uint8_t)(lut_value & 0x07U);
-		const uint8_t next_pstate = (uint8_t)((lut_value >> 5U) & 0x03U);
+		const uint8_t resolved_3bn = (uint8_t)(ctx->pending_state[net_id] & 0x07U);
 #if HEBS_TEST_PROBES
 		const uint8_t old_value = net_physical[net_id];
 #endif
 
 		net_physical[net_id] = resolved_3bn;
-		hebs_write_pstate_net(ctx, net_id, next_pstate);
-		net_mailbox[net_id] = 0U;
+		hebs_write_pstate_net(ctx, net_id, HEBS_STATE_TO_PSTATE[resolved_3bn]);
+		ctx->pending_state[net_id] = HEBS_STATE_Z;
+		ctx->dirty_net_flags[net_id] = 0U;
 #if HEBS_TEST_PROBES
 		ctx->probe_state_change_commit += (uint64_t)(old_value != resolved_3bn);
 #endif
@@ -1052,7 +1029,7 @@ static void hebs_phase_commit_dff(hebs_engine* ctx, const hebs_plan* plan)
 		next_pstate = (uint8_t)(next_l | (uint8_t)(capture_x << 1U));
 
 		hebs_write_pstate_to_trays(ctx->dff_state_trays, dst_net_id, next_pstate);
-		hebs_mailbox_or(ctx, dst_net_id, hebs_make_drive_nibble(next_l, capture_x, 1U));
+		hebs_accumulate_logic_drive(ctx, dst_net_id, next_l, capture_x, 1U);
 
 	}
 
@@ -1098,7 +1075,7 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	memset(ctx->tray_plane_b, 0, sizeof(ctx->tray_plane_b));
 	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
 	memset(ctx->net_physical, 0, sizeof(ctx->net_physical));
-	memset(ctx->net_mailbox, 0, sizeof(ctx->net_mailbox));
+	memset(ctx->pending_state, 0, sizeof(ctx->pending_state));
 	memset(ctx->dirty_net_ids, 0, sizeof(ctx->dirty_net_ids));
 	memset(ctx->dirty_net_flags, 0, sizeof(ctx->dirty_net_flags));
 	ctx->signal_trays = ctx->tray_plane_a;
@@ -1107,6 +1084,7 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	for (net_id = 0U; net_id < ctx->net_count; ++net_id)
 	{
 		ctx->net_physical[net_id] = HEBS_STATE_Z;
+		ctx->pending_state[net_id] = HEBS_STATE_Z;
 		hebs_write_pstate_net(ctx, net_id, 0x0U);
 
 	}
@@ -1130,7 +1108,7 @@ void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 	}
 
 	hebs_phase_evaluate(ctx, plan);
-	hebs_phase_resolve(ctx);
+	hebs_phase_materialize_pending(ctx);
 	hebs_phase_commit_dff(ctx, plan);
 	ctx->cycles_executed += 1U;
 	ctx->vectors_applied += 1U;

@@ -40,7 +40,7 @@ tests/results
 4 File Index
 
 engine.c
-Purpose: span-kernel based combinational execution, mailbox accumulation, dirty-net resolve, inline single-input DFF commit, and probe snapshot export
+Purpose: span-kernel based combinational execution, direct pending-state accumulation, pending-state materialization to net_physical and tray pstate, inline single-input DFF deferred accumulation, and probe snapshot export
 Location: core/engine.c
 
 loader.c
@@ -126,7 +126,7 @@ Location: core/engine.c:1053
 
 hebs_tick
 Kind: function
-Use: execute one simulation tick with combinational evaluate, resolve, and inline single-input DFF commit phases
+Use: execute one simulation tick with combinational evaluate, pending-state materialization, and inline single-input DFF accumulation phases
 Location: core/engine.c:1111
 
 hebs_get_probes
