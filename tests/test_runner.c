@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
 #include "hebs_engine.h"
 #include "primitives.h"
 #include "../benchmarks/protocol_helper.h"
@@ -85,6 +86,25 @@ static uint8_t read_net_logic(const hebs_engine* engine, uint32_t net_id)
 static uint8_t read_net_xflag(const hebs_engine* engine, uint32_t net_id)
 {
 	return (uint8_t)((read_net_pstate(engine, net_id) >> 1U) & 0x1U);
+
+}
+
+static hebs_plan* load_single_input_dff_test_plan(const char* path)
+{
+	static const char* bench_text =
+		"INPUT(contam)\n"
+		"INPUT(data)\n"
+		"OUTPUT(q)\n"
+		"q = DFF(data)\n";
+	FILE* file = fopen(path, "wb");
+	hebs_plan* plan;
+
+	assert(file != NULL);
+	assert(fputs(bench_text, file) >= 0);
+	assert(fclose(file) == 0);
+	plan = hebs_load_bench(path);
+	remove(path);
+	return plan;
 
 }
 
@@ -981,6 +1001,53 @@ static void test_engine_fact_accessors(void)
 
 }
 
+static void test_loaded_dff_captures_declared_data_only(void)
+{
+	hebs_plan* plan = load_single_input_dff_test_plan("build/test_loaded_dff_capture.bench");
+	hebs_engine engine = { 0 };
+
+	assert(plan != NULL);
+	assert(plan->dff_exec_count == 1U);
+	assert(plan->dff_exec_data[0].src_a_tray == plan->dff_exec_data[0].src_b_tray);
+	assert(plan->dff_exec_data[0].src_a_shift == plan->dff_exec_data[0].src_b_shift);
+
+	assert(hebs_init_engine(&engine, plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, plan, 0U, HEBS_X) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, plan, 1U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, plan);
+	hebs_tick(&engine, plan);
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x1U);
+
+	hebs_free_plan(plan);
+
+}
+
+static void test_loaded_dff_unknown_capture_ignores_unrelated_state(void)
+{
+	hebs_plan* plan = load_single_input_dff_test_plan("build/test_loaded_dff_unknown.bench");
+	hebs_engine engine_a = { 0 };
+	hebs_engine engine_b = { 0 };
+
+	assert(plan != NULL);
+	assert(hebs_init_engine(&engine_a, plan) == HEBS_OK);
+	assert(hebs_init_engine(&engine_b, plan) == HEBS_OK);
+
+	assert(hebs_set_primary_input(&engine_a, plan, 0U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine_a, plan, 1U, HEBS_X) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine_b, plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine_b, plan, 1U, HEBS_X) == HEBS_OK);
+	hebs_tick(&engine_a, plan);
+	hebs_tick(&engine_a, plan);
+	hebs_tick(&engine_b, plan);
+	hebs_tick(&engine_b, plan);
+
+	assert((uint8_t)read_signal_state(&engine_a, 2U) == 0x2U);
+	assert((uint8_t)read_signal_state(&engine_b, 2U) == 0x2U);
+
+	hebs_free_plan(plan);
+
+}
+
 static void test_init_rejects_oversized_signal_count(void)
 {
 	hebs_engine engine = { 0 };
@@ -1055,6 +1122,8 @@ int main(void)
 	test_protocol_helper_stats();
 	test_extended_primitive_suite();
 	test_engine_fact_accessors();
+	test_loaded_dff_captures_declared_data_only();
+	test_loaded_dff_unknown_capture_ignores_unrelated_state();
 	test_init_rejects_oversized_signal_count();
 	test_fallback_invalid_src_b_is_safely_skipped();
 	return 0;

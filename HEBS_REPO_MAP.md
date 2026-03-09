@@ -40,7 +40,7 @@ tests/results
 4 File Index
 
 engine.c
-Purpose: span-kernel based combinational execution, mailbox accumulation, dirty-net resolve, and probe snapshot export
+Purpose: span-kernel based combinational execution, mailbox accumulation, dirty-net resolve, inline single-input DFF commit, and probe snapshot export
 Location: core/engine.c
 
 loader.c
@@ -52,7 +52,7 @@ Purpose: scalar and tray level primitive logic evaluation functions
 Location: core/primitives.c
 
 state_manager.c
-Purpose: sequential commit pipeline for DFF state propagation
+Purpose: standalone sequential commit helper implementations for DFF tray propagation
 Location: core/state_manager.c
 
 hebs_engine.h
@@ -126,8 +126,8 @@ Location: core/engine.c:916
 
 hebs_tick
 Kind: function
-Use: execute one simulation tick with combinational evaluate, resolve, and DFF commit phases
-Location: core/engine.c:972
+Use: execute one simulation tick with combinational evaluate, resolve, and inline single-input DFF commit phases
+Location: core/engine.c:1000
 
 hebs_get_probes
 Kind: function
@@ -321,8 +321,8 @@ Location: core/primitives.c:319
 
 hebs_sequential_commit
 Kind: function
-Use: commit staged DFF results into state trays and active trays
-Location: core/state_manager.c:113
+Use: standalone helper that commits staged DFF tray results outside the live hebs_tick path
+Location: core/state_manager.c:99
 
 6 Type Registry
 
@@ -1008,9 +1008,9 @@ Location: include/hebs_engine.h:113
 
 hebs_plan_s.dff_exec_data
 Kind: field
-Use: executable DFF instruction array
+Use: executable DFF instruction array for single-input data capture records
 Parent: hebs_plan_s
-Location: include/hebs_engine.h:114
+Location: include/hebs_engine.h:116
 
 hebs_plan_s.dff_commit_mask
 Kind: field

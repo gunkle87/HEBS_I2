@@ -919,13 +919,10 @@ static void hebs_phase_commit_dff(hebs_engine* ctx, const hebs_plan* plan)
 	{
 		const hebs_exec_instruction_t* const exec_instr = &plan->dff_exec_data[instr_idx];
 		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
-		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
 		const uint8_t data_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
-		const uint8_t clk_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
 		const uint8_t data_l = (uint8_t)(data_pstate & 1U);
 		const uint8_t data_x = (uint8_t)((data_pstate >> 1U) & 1U);
-		const uint8_t clk_x = (uint8_t)((clk_pstate >> 1U) & 1U);
-		const uint8_t capture_x = (uint8_t)(data_x | clk_x);
+		const uint8_t capture_x = data_x;
 		const uint8_t next_l = (uint8_t)(data_l & (uint8_t)(capture_x ^ 1U));
 		const uint8_t next_pstate = (uint8_t)(next_l | (uint8_t)(capture_x << 1U));
 		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);

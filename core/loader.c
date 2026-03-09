@@ -903,10 +903,10 @@ static int hebs_build_dff_execution_plan(hebs_plan* plan)
 
 		exec_instr->gate_type = (uint8_t)HEBS_GATE_DFF;
 		exec_instr->src_a_shift = (uint8_t)(instr->src_a_bit_offset % 64U);
-		exec_instr->src_b_shift = 0U;
+		exec_instr->src_b_shift = exec_instr->src_a_shift;
 		exec_instr->dst_shift = (uint8_t)(instr->dst_bit_offset % 64U);
 		exec_instr->src_a_tray = instr->src_a_bit_offset / 64U;
-		exec_instr->src_b_tray = 0U;
+		exec_instr->src_b_tray = exec_instr->src_a_tray;
 		exec_instr->dst_tray = instr->dst_bit_offset / 64U;
 		exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
 		if (exec_instr->dst_tray < plan->tray_count)

@@ -73,6 +73,7 @@ typedef struct hebs_exec_instruction_s
 {
 	uint8_t gate_type;
 	uint8_t src_a_shift;
+	/* Single-input DFF exec records mirror src_a into src_b. */
 	uint8_t src_b_shift;
 	uint8_t dst_shift;
 	uint32_t src_a_tray;
