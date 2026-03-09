@@ -116,7 +116,15 @@ static void hebs_accumulate_drive(hebs_engine* ctx, uint32_t net_id, uint8_t dri
 
 	}
 
-	ctx->pending_state[net_id] = HEBS_RESOLVE_ACCUM_LUT[(ctx->pending_state[net_id] << 3U) | drive_kind];
+	{
+		const uint8_t next_state = HEBS_RESOLVE_ACCUM_LUT[(ctx->pending_state[net_id] << 3U) | drive_kind];
+#if HEBS_TEST_PROBES
+		ctx->probe_multi_driver_resolve_count += 1U;
+		ctx->probe_contention_count += (uint64_t)((next_state == HEBS_STATE_WX) || (next_state == HEBS_STATE_SX));
+#endif
+		ctx->pending_state[net_id] = next_state;
+
+	}
 
 }
 
@@ -640,6 +648,9 @@ static void hebs_execute_pup_span(
 			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
 			const uint8_t out_x = a_x;
 			const uint8_t out_l = (uint8_t)((a_l | src_is_z) & (uint8_t)(a_x ^ 1U));
+#if HEBS_TEST_PROBES
+			ctx->probe_pup_z_source_count += (uint64_t)src_is_z;
+#endif
 			hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 0U);
 
 		}
@@ -680,6 +691,9 @@ static void hebs_execute_pdn_span(
 			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
 			const uint8_t out_x = a_x;
 			const uint8_t out_l = (uint8_t)((a_l & (uint8_t)(src_is_z ^ 1U)) & (uint8_t)(a_x ^ 1U));
+#if HEBS_TEST_PROBES
+			ctx->probe_pdn_z_source_count += (uint64_t)src_is_z;
+#endif
 			hebs_accumulate_logic_drive(ctx, dst_net_id, out_l, out_x, 0U);
 
 		}
@@ -738,7 +752,9 @@ static void hebs_execute_tri_span(
 		m_x = (uint8_t)(0U - en_x);
 		data_drive = HEBS_STRONG_DRIVE_FROM_PSTATE[(a_x << 1U) | a_l];
 		drive_kind = (uint8_t)((m_high & data_drive) | (m_x & HEBS_DRIVE_SX));
-
+#if HEBS_TEST_PROBES
+		ctx->probe_tri_no_drive_count += (uint64_t)(drive_kind == HEBS_DRIVE_NONE);
+#endif
 		hebs_accumulate_drive(ctx, dst_net_id, drive_kind);
 
 	}
@@ -915,6 +931,9 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 				const uint8_t m_x = (uint8_t)(0U - en_x);
 				const uint8_t data_drive = hebs_make_drive_kind(a_l, a_x, 1U);
 				drive_kind = (uint8_t)((m_high & data_drive) | (m_x & HEBS_DRIVE_SX));
+#if HEBS_TEST_PROBES
+				ctx->probe_tri_no_drive_count += (uint64_t)(drive_kind == HEBS_DRIVE_NONE);
+#endif
 				break;
 			}
 			case HEBS_GATE_VCC:
@@ -924,17 +943,29 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 				drive_kind = HEBS_DRIVE_S0;
 				break;
 			case HEBS_GATE_PUP:
+			{
+				const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
+#if HEBS_TEST_PROBES
+				ctx->probe_pup_z_source_count += (uint64_t)src_is_z;
+#endif
 				drive_kind = hebs_make_drive_kind(
-					(uint8_t)((a_l | (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z)) & (uint8_t)(a_x ^ 1U)),
+					(uint8_t)((a_l | src_is_z) & (uint8_t)(a_x ^ 1U)),
 					a_x,
 					0U);
 				break;
+			}
 			case HEBS_GATE_PDN:
+			{
+				const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
+#if HEBS_TEST_PROBES
+				ctx->probe_pdn_z_source_count += (uint64_t)src_is_z;
+#endif
 				drive_kind = hebs_make_drive_kind(
-					(uint8_t)((a_l & (uint8_t)(((uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z)) ^ 1U)) & (uint8_t)(a_x ^ 1U)),
+					(uint8_t)((a_l & (uint8_t)(src_is_z ^ 1U)) & (uint8_t)(a_x ^ 1U)),
 					a_x,
 					0U);
 				break;
+			}
 			default:
 				drive_kind = HEBS_DRIVE_SX;
 				break;
@@ -975,9 +1006,12 @@ static void hebs_phase_materialize_pending(hebs_engine* ctx)
 
 		net_physical[net_id] = resolved_3bn;
 		hebs_write_pstate_net(ctx, net_id, HEBS_STATE_TO_PSTATE[resolved_3bn]);
+		ctx->probe_state_commit_count += 1U;
 		ctx->dirty_net_flags[net_id] = 0U;
 #if HEBS_TEST_PROBES
 		ctx->probe_state_change_commit += (uint64_t)(old_value != resolved_3bn);
+		ctx->probe_unknown_state_materialize_count += (uint64_t)((resolved_3bn == HEBS_STATE_X) || (resolved_3bn == HEBS_STATE_WX) || (resolved_3bn == HEBS_STATE_SX));
+		ctx->probe_highz_materialize_count += (uint64_t)(resolved_3bn == HEBS_STATE_Z);
 #endif
 
 	}
@@ -1067,6 +1101,15 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	ctx->probe_gate_eval = 0U;
 	ctx->probe_state_change_commit = 0U;
 	ctx->probe_dff_exec = 0U;
+	ctx->probe_tick_count = 0U;
+	ctx->probe_state_commit_count = 0U;
+	ctx->probe_contention_count = 0U;
+	ctx->probe_unknown_state_materialize_count = 0U;
+	ctx->probe_highz_materialize_count = 0U;
+	ctx->probe_multi_driver_resolve_count = 0U;
+	ctx->probe_tri_no_drive_count = 0U;
+	ctx->probe_pup_z_source_count = 0U;
+	ctx->probe_pdn_z_source_count = 0U;
 	memset(ctx->tray_plane_a, 0, sizeof(ctx->tray_plane_a));
 	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
 	memset(ctx->net_physical, 0, sizeof(ctx->net_physical));
@@ -1106,6 +1149,7 @@ void hebs_tick(hebs_engine* ctx, hebs_plan* plan)
 	hebs_phase_commit_dff(ctx, plan);
 	ctx->cycles_executed += 1U;
 	ctx->vectors_applied += 1U;
+	ctx->probe_tick_count += 1U;
 	ctx->current_tick += 1U;
 	ctx->last_status = HEBS_OK;
 
@@ -1126,9 +1170,18 @@ hebs_probes hebs_get_probes(const hebs_engine* ctx)
 	probes.chunk_exec = ctx->probe_chunk_exec;
 	probes.gate_eval = ctx->probe_gate_eval;
 	probes.dff_exec = ctx->probe_dff_exec;
+	probes.tick_count = ctx->probe_tick_count;
+	probes.state_commit_count = ctx->probe_state_commit_count;
 #if HEBS_TEST_PROBES
 	probes.input_toggle = ctx->probe_input_toggle;
 	probes.state_change_commit = ctx->probe_state_change_commit;
+	probes.contention_count = ctx->probe_contention_count;
+	probes.unknown_state_materialize_count = ctx->probe_unknown_state_materialize_count;
+	probes.highz_materialize_count = ctx->probe_highz_materialize_count;
+	probes.multi_driver_resolve_count = ctx->probe_multi_driver_resolve_count;
+	probes.tri_no_drive_count = ctx->probe_tri_no_drive_count;
+	probes.pup_z_source_count = ctx->probe_pup_z_source_count;
+	probes.pdn_z_source_count = ctx->probe_pdn_z_source_count;
 #endif
 	return probes;
 

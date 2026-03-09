@@ -172,6 +172,15 @@ typedef struct hebs_engine_s
 	uint64_t probe_gate_eval;
 	uint64_t probe_state_change_commit;
 	uint64_t probe_dff_exec;
+	uint64_t probe_tick_count;
+	uint64_t probe_state_commit_count;
+	uint64_t probe_contention_count;
+	uint64_t probe_unknown_state_materialize_count;
+	uint64_t probe_highz_materialize_count;
+	uint64_t probe_multi_driver_resolve_count;
+	uint64_t probe_tri_no_drive_count;
+	uint64_t probe_pup_z_source_count;
+	uint64_t probe_pdn_z_source_count;
 
 } hebs_engine;
 

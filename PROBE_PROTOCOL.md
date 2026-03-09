@@ -64,8 +64,17 @@ Defines rules governing engine probes used for benchmarking and tooling.
 | `chunk_exec`        | Permanent | Bench  | Always on  |
 | `gate_eval`         | Permanent | Bench  | Always on  |
 | `dff_exec`          | Permanent | Bench  | Always on  |
+| `tick_count`        | Permanent | Bench  | Always on  |
+| `state_commit_count` | Permanent | Bench | Always on  |
 | `input_toggle`      | Test      | Test   | `HEBS_TEST_PROBES` |
 | `state_change_commit` | Test    | Test   | `HEBS_TEST_PROBES` |
+| `contention_count`  | Test      | Test   | `HEBS_TEST_PROBES` |
+| `unknown_state_materialize_count` | Test | Test | `HEBS_TEST_PROBES` |
+| `highz_materialize_count` | Test | Test | `HEBS_TEST_PROBES` |
+| `multi_driver_resolve_count` | Test | Test | `HEBS_TEST_PROBES` |
+| `tri_no_drive_count` | Test     | Test   | `HEBS_TEST_PROBES` |
+| `pup_z_source_count` | Test     | Test   | `HEBS_TEST_PROBES` |
+| `pdn_z_source_count` | Test     | Test   | `HEBS_TEST_PROBES` |
 
 Removed probes:
 -   `state_write_attempt`

@@ -60,7 +60,7 @@ Purpose: public engine data model, enums, plans, probes, and main engine API dec
 Location: include/hebs_engine.h
 
 hebs_probe_profile.h
-Purpose: compile time probe profile selection and compatibility probe gate
+Purpose: compile time probe profile selection and test-probe gate
 Location: include/hebs_probe_profile.h
 
 primitives.h
@@ -955,37 +955,91 @@ hebs_probes_s.input_apply
 Kind: field
 Use: raw count of primary input apply operations
 Parent: hebs_probes_s
-Location: include/hebs_engine.h:127
-
-hebs_probes_s.input_toggle
-Kind: field
-Use: raw count of input toggles when test probes are enabled
-Parent: hebs_probes_s
-Location: include/hebs_engine.h:128
+Location: include/hebs_types.h
 
 hebs_probes_s.chunk_exec
 Kind: field
 Use: raw count of chunk or fallback execution units
 Parent: hebs_probes_s
-Location: include/hebs_engine.h:129
+Location: include/hebs_types.h
 
 hebs_probes_s.gate_eval
 Kind: field
 Use: raw count of gate evaluation writes
 Parent: hebs_probes_s
-Location: include/hebs_engine.h:130
-
-hebs_probes_s.state_change_commit
-Kind: field
-Use: raw count of committed state changes when test probes are enabled
-Parent: hebs_probes_s
-Location: include/hebs_engine.h:131
+Location: include/hebs_types.h
 
 hebs_probes_s.dff_exec
 Kind: field
 Use: raw count of sequential DFF execution operations
 Parent: hebs_probes_s
-Location: include/hebs_engine.h:132
+Location: include/hebs_types.h
+
+hebs_probes_s.tick_count
+Kind: field
+Use: raw count of successful tick completions
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.state_commit_count
+Kind: field
+Use: raw count of materialized net state writes
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.input_toggle
+Kind: field
+Use: raw count of input toggles when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.state_change_commit
+Kind: field
+Use: raw count of committed state changes when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.contention_count
+Kind: field
+Use: raw count of multi-driver updates that resolve into contention-class state when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.unknown_state_materialize_count
+Kind: field
+Use: raw count of materialized unknown-class states when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.highz_materialize_count
+Kind: field
+Use: raw count of materialized high-Z states when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.multi_driver_resolve_count
+Kind: field
+Use: raw count of second-or-later drive resolutions on already-dirty nets when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.tri_no_drive_count
+Kind: field
+Use: raw count of TRI evaluations that contribute no drive when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.pup_z_source_count
+Kind: field
+Use: raw count of PUP evaluations whose source net is Z when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
+
+hebs_probes_s.pdn_z_source_count
+Kind: field
+Use: raw count of PDN evaluations whose source net is Z when test probes are enabled
+Parent: hebs_probes_s
+Location: include/hebs_types.h
 
 hebs_engine_s.current_tick
 Kind: field
@@ -1070,6 +1124,60 @@ Kind: field
 Use: internal probe counter for DFF executions
 Parent: hebs_engine_s
 Location: include/hebs_engine.h:182
+
+hebs_engine_s.probe_tick_count
+Kind: field
+Use: internal probe counter for successful tick completions
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_state_commit_count
+Kind: field
+Use: internal probe counter for materialized net state writes
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_contention_count
+Kind: field
+Use: internal probe counter for contention-class multi-driver resolutions
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_unknown_state_materialize_count
+Kind: field
+Use: internal probe counter for unknown-class materializations
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_highz_materialize_count
+Kind: field
+Use: internal probe counter for high-Z materializations
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_multi_driver_resolve_count
+Kind: field
+Use: internal probe counter for second-or-later drive resolutions on dirty nets
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_tri_no_drive_count
+Kind: field
+Use: internal probe counter for TRI evaluations that contribute no drive
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_pup_z_source_count
+Kind: field
+Use: internal probe counter for PUP evaluations whose source is Z
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
+
+hebs_engine_s.probe_pdn_z_source_count
+Kind: field
+Use: internal probe counter for PDN evaluations whose source is Z
+Parent: hebs_engine_s
+Location: include/hebs_engine.h
 
 9 Referenced Inputs and Support Files
 

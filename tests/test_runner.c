@@ -1584,6 +1584,80 @@ static void test_engine_fact_accessors(void)
 
 }
 
+static void test_probe_expansion_counters(void)
+{
+	hebs_engine engine = { 0 };
+	hebs_probes probes;
+	uint32_t primary_inputs[2] = { 0U, 1U };
+	hebs_lep_instruction_t lep_data[5];
+	hebs_plan plan = { 0 };
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_VCC;
+	lep_data[0].input_count = 0U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(0U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[1].gate_type = (uint8_t)HEBS_GATE_GND;
+	lep_data[1].input_count = 0U;
+	lep_data[1].level = 1U;
+	lep_data[1].src_a_bit_offset = net_to_bit(0U);
+	lep_data[1].src_b_bit_offset = net_to_bit(0U);
+	lep_data[1].dst_bit_offset = net_to_bit(2U);
+
+	lep_data[2].gate_type = (uint8_t)HEBS_GATE_PUP;
+	lep_data[2].input_count = 1U;
+	lep_data[2].level = 1U;
+	lep_data[2].src_a_bit_offset = net_to_bit(0U);
+	lep_data[2].src_b_bit_offset = net_to_bit(0U);
+	lep_data[2].dst_bit_offset = net_to_bit(3U);
+
+	lep_data[3].gate_type = (uint8_t)HEBS_GATE_PDN;
+	lep_data[3].input_count = 1U;
+	lep_data[3].level = 1U;
+	lep_data[3].src_a_bit_offset = net_to_bit(0U);
+	lep_data[3].src_b_bit_offset = net_to_bit(0U);
+	lep_data[3].dst_bit_offset = net_to_bit(4U);
+
+	lep_data[4].gate_type = (uint8_t)HEBS_GATE_TRI;
+	lep_data[4].input_count = 2U;
+	lep_data[4].level = 1U;
+	lep_data[4].src_a_bit_offset = net_to_bit(0U);
+	lep_data[4].src_b_bit_offset = net_to_bit(1U);
+	lep_data[4].dst_bit_offset = net_to_bit(5U);
+
+	plan.lep_hash = 11004U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 2U;
+	plan.signal_count = 6U;
+	plan.gate_count = 5U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_Z) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S0) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	probes = hebs_get_probes(&engine);
+
+	assert(probes.tick_count == 1U);
+	assert(probes.state_commit_count == 3U);
+
+#if HEBS_TEST_PROBES
+	assert(probes.multi_driver_resolve_count == 1U);
+	assert(probes.contention_count == 1U);
+	assert(probes.unknown_state_materialize_count == 1U);
+	assert(probes.highz_materialize_count == 0U);
+	assert(probes.tri_no_drive_count == 1U);
+	assert(probes.pup_z_source_count == 1U);
+	assert(probes.pdn_z_source_count == 1U);
+#endif
+
+}
+
 static void test_loaded_dff_captures_declared_data_only(void)
 {
 	hebs_plan* plan = load_single_input_dff_test_plan("build/test_loaded_dff_capture.bench");
@@ -1838,6 +1912,7 @@ int main(void)
 	test_protocol_helper_stats();
 	test_extended_primitive_suite();
 	test_engine_fact_accessors();
+	test_probe_expansion_counters();
 	test_loaded_dff_captures_declared_data_only();
 	test_loaded_dff_unknown_capture_ignores_unrelated_state();
 	test_loader_batched_specialized_span_execution();
