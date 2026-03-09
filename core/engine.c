@@ -1073,7 +1073,6 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	ctx->probe_state_change_commit = 0U;
 	ctx->probe_dff_exec = 0U;
 	memset(ctx->tray_plane_a, 0, sizeof(ctx->tray_plane_a));
-	memset(ctx->tray_plane_b, 0, sizeof(ctx->tray_plane_b));
 	memset(ctx->dff_state_trays, 0, sizeof(ctx->dff_state_trays));
 	memset(ctx->net_physical, 0, sizeof(ctx->net_physical));
 	memset(ctx->pending_state, 0, sizeof(ctx->pending_state));

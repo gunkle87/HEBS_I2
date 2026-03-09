@@ -673,8 +673,6 @@ static void test_dff_x_poison_chain_latency_10(void)
 		dff_exec_data[idx].src_a_tray = net_to_bit(src_net) / 64U;
 		dff_exec_data[idx].src_b_tray = net_to_bit(11U) / 64U;
 		dff_exec_data[idx].dst_tray = net_to_bit(dst_net) / 64U;
-		dff_exec_data[idx].dst_mask = 0x3ULL << dff_exec_data[idx].dst_shift;
-
 	}
 
 	plan.lep_hash = 1006U;
@@ -1089,7 +1087,6 @@ static void test_parallel_dff_tray_commit(void)
 	hebs_lep_instruction_t lep_data[1];
 	uint32_t dff_indices[1] = { 0U };
 	hebs_exec_instruction_t dff_exec_data[1];
-	uint64_t dff_commit_mask[1] = { 0ULL };
 	hebs_plan plan = { 0 };
 
 	lep_data[0].gate_type = (uint8_t)HEBS_GATE_DFF;
@@ -1117,11 +1114,8 @@ static void test_parallel_dff_tray_commit(void)
 	dff_exec_data[0].src_a_tray = 0U;
 	dff_exec_data[0].src_b_tray = 0U;
 	dff_exec_data[0].dst_tray = 0U;
-	dff_exec_data[0].dst_mask = 0x3ULL << 2U;
-	dff_commit_mask[0] = dff_exec_data[0].dst_mask;
 	plan.dff_exec_count = 1U;
 	plan.dff_exec_data = dff_exec_data;
-	plan.dff_commit_mask = dff_commit_mask;
 
 	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S0) == HEBS_OK);
@@ -1408,7 +1402,6 @@ static void test_live_pending_batched_fallback_equivalence(void)
 		exec_data[idx].src_a_tray = lep_data[idx].src_a_bit_offset >> 6U;
 		exec_data[idx].src_b_tray = lep_data[idx].src_b_bit_offset >> 6U;
 		exec_data[idx].dst_tray = lep_data[idx].dst_bit_offset >> 6U;
-		exec_data[idx].dst_mask = 0x3ULL << exec_data[idx].dst_shift;
 		spans[idx].start = idx;
 		spans[idx].count = 1U;
 		spans[idx].gate_type = lep_data[idx].gate_type;
@@ -1478,8 +1471,6 @@ static void test_live_pending_dff_deferred_visibility(void)
 	dff_exec_data[0].src_a_tray = 0U;
 	dff_exec_data[0].src_b_tray = 0U;
 	dff_exec_data[0].dst_tray = 0U;
-	dff_exec_data[0].dst_mask = 0x3ULL << 2U;
-
 	plan.lep_hash = 11003U;
 	plan.level_count = 1U;
 	plan.num_primary_inputs = 1U;
@@ -1756,8 +1747,6 @@ static void test_batched_invalid_src_b_is_safely_skipped(void)
 	comb_exec_data[0].src_a_tray = 0U;
 	comb_exec_data[0].src_b_tray = 1U;
 	comb_exec_data[0].dst_tray = 0U;
-	comb_exec_data[0].dst_mask = 0ULL;
-
 	comb_spans[0].start = 0U;
 	comb_spans[0].count = 1U;
 	comb_spans[0].gate_type = (uint8_t)HEBS_GATE_OR;
@@ -1802,8 +1791,6 @@ static void test_dff_invalid_destination_is_safely_skipped(void)
 	dff_exec_data[0].src_a_tray = 0U;
 	dff_exec_data[0].src_b_tray = 0U;
 	dff_exec_data[0].dst_tray = 1U;
-	dff_exec_data[0].dst_mask = 0ULL;
-
 	plan.lep_hash = 10013U;
 	plan.num_primary_inputs = 1U;
 	plan.signal_count = 1U;

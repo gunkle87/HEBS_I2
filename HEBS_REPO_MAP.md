@@ -777,12 +777,6 @@ Use: tray index for destination
 Parent: hebs_exec_instruction_s
 Location: include/hebs_engine.h:79
 
-hebs_exec_instruction_s.dst_mask
-Kind: field
-Use: lane mask for destination write
-Parent: hebs_exec_instruction_s
-Location: include/hebs_engine.h:80
-
 hebs_gate_span_s.start
 Kind: field
 Use: start index into combinational execution arrays
@@ -927,12 +921,6 @@ Use: executable DFF instruction array for single-input data capture records
 Parent: hebs_plan_s
 Location: include/hebs_engine.h:116
 
-hebs_plan_s.dff_commit_mask
-Kind: field
-Use: tray masks used for DFF commit merge
-Parent: hebs_plan_s
-Location: include/hebs_engine.h:115
-
 hebs_plan_s.comb_instruction_count
 Kind: field
 Use: number of combinational instructions in packed execution plan
@@ -962,12 +950,6 @@ Kind: field
 Use: span table used by batched combinational dispatcher
 Parent: hebs_plan_s
 Location: include/hebs_engine.h:120
-
-hebs_plan_s.internal_transition_lsb_mask
-Kind: field
-Use: bit mask for non primary signal transition accounting support
-Parent: hebs_plan_s
-Location: include/hebs_engine.h:121
 
 hebs_probes_s.input_apply
 Kind: field
@@ -1022,12 +1004,6 @@ Kind: field
 Use: first tray plane storage buffer
 Parent: hebs_engine_s
 Location: include/hebs_engine.h:169
-
-hebs_engine_s.tray_plane_b
-Kind: field
-Use: second tray plane storage buffer
-Parent: hebs_engine_s
-Location: include/hebs_engine.h:170
 
 hebs_engine_s.dff_state_trays
 Kind: field

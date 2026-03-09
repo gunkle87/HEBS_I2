@@ -875,7 +875,6 @@ static int hebs_build_dff_execution_plan(hebs_plan* plan)
 
 	plan->dff_exec_count = plan->dff_instruction_count;
 	plan->dff_exec_data = NULL;
-	plan->dff_commit_mask = NULL;
 	if (plan->dff_instruction_count == 0U)
 	{
 		return 1;
@@ -883,13 +882,10 @@ static int hebs_build_dff_execution_plan(hebs_plan* plan)
 	}
 
 	plan->dff_exec_data = (hebs_exec_instruction_t*)calloc(plan->dff_instruction_count, sizeof(hebs_exec_instruction_t));
-	plan->dff_commit_mask = (uint64_t*)calloc(plan->tray_count, sizeof(uint64_t));
-	if (!plan->dff_exec_data || !plan->dff_commit_mask)
+	if (!plan->dff_exec_data)
 	{
 		free(plan->dff_exec_data);
-		free(plan->dff_commit_mask);
 		plan->dff_exec_data = NULL;
-		plan->dff_commit_mask = NULL;
 		plan->dff_exec_count = 0U;
 		return 0;
 
@@ -908,12 +904,6 @@ static int hebs_build_dff_execution_plan(hebs_plan* plan)
 		exec_instr->src_a_tray = instr->src_a_bit_offset / 64U;
 		exec_instr->src_b_tray = exec_instr->src_a_tray;
 		exec_instr->dst_tray = instr->dst_bit_offset / 64U;
-		exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
-		if (exec_instr->dst_tray < plan->tray_count)
-		{
-			plan->dff_commit_mask[exec_instr->dst_tray] |= exec_instr->dst_mask;
-
-		}
 
 	}
 
@@ -1137,7 +1127,6 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 					exec_instr->src_a_tray = local->src_a_tray;
 					exec_instr->src_b_tray = local->src_b_tray;
 					exec_instr->dst_tray = local->dst_tray;
-					exec_instr->dst_mask = 0x3ULL << exec_instr->dst_shift;
 					++write_idx;
 
 				}
@@ -1163,79 +1152,6 @@ static int hebs_build_comb_execution_plan(hebs_plan* plan)
 	}
 
 	free(local_entries);
-	return 1;
-
-}
-
-static int hebs_build_internal_transition_mask(hebs_plan* plan)
-{
-	uint8_t* is_primary_input;
-	uint32_t idx;
-
-	if (!plan)
-	{
-		return 0;
-
-	}
-
-	plan->internal_transition_lsb_mask = NULL;
-	if (plan->tray_count == 0U || plan->signal_count == 0U)
-	{
-		return 1;
-
-	}
-
-	plan->internal_transition_lsb_mask = (uint64_t*)calloc(plan->tray_count, sizeof(uint64_t));
-	if (!plan->internal_transition_lsb_mask)
-	{
-		return 0;
-
-	}
-
-	is_primary_input = (uint8_t*)calloc(plan->signal_count, sizeof(uint8_t));
-	if (!is_primary_input)
-	{
-		free(plan->internal_transition_lsb_mask);
-		plan->internal_transition_lsb_mask = NULL;
-		return 0;
-
-	}
-
-	for (idx = 0U; idx < plan->num_primary_inputs; ++idx)
-	{
-		uint32_t signal_id = plan->primary_input_ids[idx];
-		if (signal_id < plan->signal_count)
-		{
-			is_primary_input[signal_id] = 1U;
-
-		}
-
-	}
-
-	for (idx = 0U; idx < plan->signal_count; ++idx)
-	{
-		uint32_t bit_offset;
-		uint32_t tray_index;
-		uint32_t bit_position;
-
-		if (is_primary_input[idx])
-		{
-			continue;
-
-		}
-
-		bit_offset = idx * 2U;
-		tray_index = bit_offset / 64U;
-		bit_position = bit_offset % 64U;
-		if (tray_index < plan->tray_count)
-		{
-			plan->internal_transition_lsb_mask[tray_index] |= (1ULL << bit_position);
-
-		}
-
-	}
-
-	free(is_primary_input);
 	return 1;
 
 }
@@ -1400,16 +1316,6 @@ hebs_plan* hebs_load_bench(const char* file_path)
 
 	}
 
-	if (!hebs_build_internal_transition_mask(plan))
-	{
-		hebs_free_signal_table(&signals);
-		free(primary_outputs);
-		free(gates);
-		hebs_free_plan(plan);
-		return NULL;
-
-	}
-
 	plan->lep_hash = hebs_calculate_lep_hash(plan);
 	hebs_free_signal_table(&signals);
 	free(primary_outputs);
@@ -1430,11 +1336,9 @@ void hebs_free_plan(hebs_plan* plan)
 	free(plan->lep_data);
 	free(plan->dff_instruction_indices);
 	free(plan->dff_exec_data);
-	free(plan->dff_commit_mask);
 	free(plan->comb_instruction_indices);
 	free(plan->comb_exec_data);
 	free(plan->comb_spans);
-	free(plan->internal_transition_lsb_mask);
 	free(plan);
 
 }

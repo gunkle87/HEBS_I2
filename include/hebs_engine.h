@@ -79,7 +79,6 @@ typedef struct hebs_exec_instruction_s
 	uint32_t src_a_tray;
 	uint32_t src_b_tray;
 	uint32_t dst_tray;
-	uint64_t dst_mask;
 
 } hebs_exec_instruction_t;
 
@@ -114,13 +113,11 @@ typedef struct hebs_plan_s
 	uint32_t* dff_instruction_indices;
 	uint32_t dff_exec_count;
 	hebs_exec_instruction_t* dff_exec_data;
-	uint64_t* dff_commit_mask;
 	uint32_t comb_instruction_count;
 	uint32_t* comb_instruction_indices;
 	hebs_exec_instruction_t* comb_exec_data;
 	uint32_t comb_span_count;
 	hebs_gate_span_t* comb_spans;
-	uint64_t* internal_transition_lsb_mask;
 
 } hebs_plan;
 
@@ -159,7 +156,6 @@ typedef struct hebs_engine_s
 	uint32_t tray_count;
 	uint32_t net_count;
 	HEBS_ALIGN64 uint64_t tray_plane_a[HEBS_MAX_SIGNAL_TRAYS];
-	HEBS_ALIGN64 uint64_t tray_plane_b[HEBS_MAX_SIGNAL_TRAYS];
 	HEBS_ALIGN64 uint64_t dff_state_trays[HEBS_MAX_SIGNAL_TRAYS];
 	HEBS_ALIGN64 uint8_t net_physical[HEBS_MAX_SIGNALS];
 	HEBS_ALIGN64 uint8_t pending_state[HEBS_MAX_SIGNALS];
