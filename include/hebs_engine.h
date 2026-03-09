@@ -192,6 +192,7 @@ uint32_t hebs_get_final_crc32(const hebs_engine* ctx);
 uint64_t hebs_get_plan_hash(const hebs_plan* plan);
 int hebs_get_plan_metadata(const hebs_plan* plan, hebs_plan_metadata* out_metadata);
 hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index, hebs_logic_t value);
+int hebs_get_net_physical_state(const hebs_engine* ctx, uint32_t net_id, hebs_logic_t* out_value);
 uint8_t hebs_get_primary_input_state(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);
 hebs_logic_t hebs_get_primary_input(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index);
 const uint64_t* hebs_get_signal_tray(const hebs_engine* ctx, uint32_t tray_index);

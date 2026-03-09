@@ -1280,6 +1280,19 @@ hebs_status_t hebs_set_primary_input(hebs_engine* ctx, const hebs_plan* plan, ui
 
 }
 
+int hebs_get_net_physical_state(const hebs_engine* ctx, uint32_t net_id, hebs_logic_t* out_value)
+{
+	if (!ctx || !out_value || net_id >= ctx->net_count)
+	{
+		return 0;
+
+	}
+
+	*out_value = hebs_physical_to_logic(ctx->net_physical[net_id]);
+	return 1;
+
+}
+
 uint8_t hebs_get_primary_input_state(const hebs_engine* ctx, const hebs_plan* plan, uint32_t input_index)
 {
 	uint32_t signal_id;

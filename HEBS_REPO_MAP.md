@@ -164,6 +164,11 @@ Kind: function
 Use: apply primary input value to engine tray storage
 Location: core/engine.c:1251
 
+hebs_get_net_physical_state
+Kind: function
+Use: read current 3-bit physical state of a net through the public API
+Location: core/engine.c
+
 hebs_get_primary_input
 Kind: function
 Use: read primary input value from engine state
@@ -443,9 +448,9 @@ Kind: macro
 Use: default probe profile selector for perf mode
 Location: include/hebs_probe_profile.h:9
 
-HEBS_COMPAT_PROBES_ENABLED
+HEBS_TEST_PROBES
 Kind: macro
-Use: compile time gate for compatibility probe updates
+Use: compile time gate for test-only probe updates
 Location: include/hebs_probe_profile.h:13
 
 HEBS_LUT_RESOLVE
@@ -972,7 +977,7 @@ Location: include/hebs_engine.h:127
 
 hebs_probes_s.input_toggle
 Kind: field
-Use: raw count of input toggles when compatibility probes are enabled
+Use: raw count of input toggles when test probes are enabled
 Parent: hebs_probes_s
 Location: include/hebs_engine.h:128
 
@@ -990,7 +995,7 @@ Location: include/hebs_engine.h:130
 
 hebs_probes_s.state_change_commit
 Kind: field
-Use: raw count of committed state changes when compatibility probes are enabled
+Use: raw count of committed state changes when test probes are enabled
 Parent: hebs_probes_s
 Location: include/hebs_engine.h:131
 
@@ -1155,7 +1160,7 @@ Location: benchmarks/results/metrics_history.csv
 
 metrics_history_compat.csv
 Kind: benchmark ledger
-Use: compatibility profile benchmark history rows
+Use: legacy benchmark history rows emitted under the compat-named CSV artifact
 Location: benchmarks/results/metrics_history_compat.csv
 
 10 Glossary
@@ -1187,8 +1192,8 @@ Directory group of benchmark inputs used by runner execution.
 Runner
 External benchmark binary that executes workloads and derives metrics.
 
-Compatibility profile
-Build profile with compatibility probes enabled.
+Test probe build
+Build configuration with test probes enabled.
 
 Performance profile
-Build profile with compatibility probes disabled.
+Build configuration with test probes disabled.

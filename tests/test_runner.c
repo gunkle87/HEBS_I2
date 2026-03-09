@@ -89,9 +89,11 @@ static uint8_t read_net_xflag(const hebs_engine* engine, uint32_t net_id)
 
 }
 
-static uint8_t read_net_3bn(const hebs_engine* engine, uint32_t net_id)
+static hebs_logic_t read_net_3bn(const hebs_engine* engine, uint32_t net_id)
 {
-	return (uint8_t)(engine->net_physical[net_id] & 0x7U);
+	hebs_logic_t value = HEBS_X;
+	assert(hebs_get_net_physical_state(engine, net_id, &value) == 1);
+	return value;
 
 }
 
@@ -1329,11 +1331,11 @@ static void test_live_pending_accumulator_semantics(void)
 	assert(hebs_set_primary_input(&engine, &plan, 1U, HEBS_S0) == HEBS_OK);
 	hebs_tick(&engine, &plan);
 
-	assert(read_net_3bn(&engine, 2U) == 1U);
-	assert(read_net_3bn(&engine, 3U) == 2U);
-	assert(read_net_3bn(&engine, 4U) == 6U);
-	assert(read_net_3bn(&engine, 5U) == 1U);
-	assert(read_net_3bn(&engine, 6U) == 4U);
+	assert(read_net_3bn(&engine, 2U) == HEBS_S1);
+	assert(read_net_3bn(&engine, 3U) == HEBS_S0);
+	assert(read_net_3bn(&engine, 4U) == HEBS_WX);
+	assert(read_net_3bn(&engine, 5U) == HEBS_S1);
+	assert(read_net_3bn(&engine, 6U) == HEBS_W1);
 	assert(read_net_pstate(&engine, 2U) == 0x1U);
 	assert(read_net_pstate(&engine, 3U) == 0x0U);
 	assert(read_net_pstate(&engine, 4U) == 0x2U);
@@ -1490,13 +1492,13 @@ static void test_live_pending_dff_deferred_visibility(void)
 	plan.dff_exec_data = dff_exec_data;
 
 	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
-	assert(read_net_3bn(&engine, 1U) == 0U);
+	assert(read_net_3bn(&engine, 1U) == HEBS_Z);
 	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
 	hebs_tick(&engine, &plan);
-	assert(read_net_3bn(&engine, 1U) == 0U);
+	assert(read_net_3bn(&engine, 1U) == HEBS_Z);
 	assert(read_net_pstate(&engine, 1U) == 0x0U);
 	hebs_tick(&engine, &plan);
-	assert(read_net_3bn(&engine, 1U) == 1U);
+	assert(read_net_3bn(&engine, 1U) == HEBS_S1);
 	assert(read_net_pstate(&engine, 1U) == 0x1U);
 
 }
@@ -1535,6 +1537,7 @@ static void test_engine_fact_accessors(void)
 	hebs_engine engine = { 0 };
 	hebs_plan_metadata metadata;
 	hebs_run_status status;
+	hebs_logic_t value = HEBS_X;
 	uint32_t crc_before;
 	uint32_t crc_after;
 
@@ -1549,8 +1552,13 @@ static void test_engine_fact_accessors(void)
 	assert(hebs_get_plan_metadata(NULL, &metadata) == 0);
 	assert(hebs_get_plan_metadata(plan, NULL) == 0);
 	assert(hebs_get_plan_hash(NULL) == 0U);
+	assert(hebs_get_net_physical_state(NULL, 0U, &value) == 0);
+	assert(hebs_get_net_physical_state(&engine, 0U, NULL) == 0);
 
 	assert(hebs_init_engine(&engine, plan) == HEBS_OK);
+	assert(hebs_get_net_physical_state(&engine, plan->signal_count, &value) == 0);
+	assert(hebs_get_net_physical_state(&engine, 0U, &value) == 1);
+	assert(value == HEBS_Z);
 	assert(hebs_get_run_status(&engine, &status) == 1);
 	assert(status.last_status == HEBS_OK);
 	assert(status.current_tick == 0U);
@@ -1567,6 +1575,8 @@ static void test_engine_fact_accessors(void)
 	assert(status.last_status == HEBS_ERR_LOGIC);
 
 	assert(hebs_set_primary_input(&engine, plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_get_net_physical_state(&engine, plan->primary_input_ids[0U], &value) == 1);
+	assert(value == HEBS_S1);
 	assert(hebs_get_primary_input_state(&engine, plan, 0U) == 0x1U);
 	assert(hebs_get_primary_input(&engine, plan, 0U) == HEBS_S1);
 	hebs_tick(&engine, plan);

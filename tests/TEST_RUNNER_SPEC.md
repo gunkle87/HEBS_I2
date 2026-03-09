@@ -30,6 +30,18 @@ Exit behavior:
 - validates loader and plan structural expectations using `s27.bench`
 - validates basic probe behavior under PERF versus TEST profile
 
+`test_pending_state_accumulator_closure_proof`
+- validates the proven closure mapping between mailbox resolution semantics and the resolved-state accumulator domain
+
+`test_live_pending_accumulator_semantics`
+- validates direct pending-state accumulation on the live engine path for duplicate strong drive, strong-vs-weak, weak-vs-weak, TRI no-drive, and pull behavior
+
+`test_live_pending_batched_fallback_equivalence`
+- validates accumulator-path equivalence between batched spans and fallback evaluation
+
+`test_live_pending_dff_deferred_visibility`
+- validates that DFF outputs remain next-tick visible under pending-state accumulation
+
 `test_functional_gate_suite`
 - validates logical correctness of AND/OR flows over packed state variants
 - validates primary input write and signal read behavior
@@ -85,6 +97,7 @@ Input patterns are explicitly constructed in code.
 Tests are external to engine core implementation.
 Tests may initialize engine, apply inputs, tick engine, and read outputs/probes.
 Tests must not patch or mutate core internals outside public API contracts.
+Tests should read engine state through public API and public helper interfaces rather than direct core-field peeks.
 
 ## 9. Extension Guidelines
 When adding engine-facing functionality:
