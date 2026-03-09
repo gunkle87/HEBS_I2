@@ -48,11 +48,11 @@ Purpose: bench netlist parsing, levelization, and execution plan construction
 Location: core/loader.c
 
 primitives.c
-Purpose: scalar and tray level primitive logic evaluation functions
+Purpose: scalar logic evaluation and resolution helper functions
 Location: core/primitives.c
 
 state_manager.c
-Purpose: standalone sequential commit helper implementations for DFF tray propagation
+Purpose: retained empty translation unit for retired standalone state manager surface
 Location: core/state_manager.c
 
 hebs_engine.h
@@ -64,11 +64,11 @@ Purpose: compile time probe profile selection and compatibility probe gate
 Location: include/hebs_probe_profile.h
 
 primitives.h
-Purpose: primitive logic function declarations used by engine execution code
+Purpose: scalar logic helper declarations used by engine tests and support code
 Location: include/primitives.h
 
 state_manager.h
-Purpose: sequential commit interface declaration
+Purpose: retired state manager header placeholder with no live exports
 Location: include/state_manager.h
 
 runner.c
@@ -177,152 +177,77 @@ Location: core/engine.c:1191
 hebs_resolve_states
 Kind: function
 Use: resolve two logic states through resolution lookup
-Location: core/primitives.c:27
-
-hebs_gate_and_simd
-Kind: function
-Use: evaluate and on packed tray lanes
-Location: core/primitives.c:33
-
-hebs_gate_or_simd
-Kind: function
-Use: evaluate or on packed tray lanes
-Location: core/primitives.c:45
-
-hebs_gate_xor_simd
-Kind: function
-Use: evaluate xor on packed tray lanes
-Location: core/primitives.c:57
-
-hebs_gate_nand_simd
-Kind: function
-Use: evaluate nand on packed tray lanes
-Location: core/primitives.c:69
-
-hebs_gate_nor_simd
-Kind: function
-Use: evaluate nor on packed tray lanes
-Location: core/primitives.c:75
-
-hebs_gate_xnor_simd
-Kind: function
-Use: evaluate xnor on packed tray lanes
-Location: core/primitives.c:81
-
-hebs_gate_not_simd
-Kind: function
-Use: evaluate not on packed tray lanes
-Location: core/primitives.c:87
-
-hebs_gate_buf_simd
-Kind: function
-Use: pass through tray lane values
-Location: core/primitives.c:95
-
-hebs_gate_weak_pull_simd
-Kind: function
-Use: apply weak pull behavior on packed tray lanes
-Location: core/primitives.c:101
-
-hebs_gate_weak_pull_down_simd
-Kind: function
-Use: apply weak pull down behavior on packed tray lanes
-Location: core/primitives.c:109
-
-hebs_gate_strong_pull_simd
-Kind: function
-Use: apply strong pull behavior on packed tray lanes
-Location: core/primitives.c:115
-
-hebs_gate_vcc_simd
-Kind: function
-Use: generate constant high tray lane value
-Location: core/primitives.c:122
-
-hebs_gate_gnd_simd
-Kind: function
-Use: generate constant low tray lane value
-Location: core/primitives.c:128
-
-hebs_gate_tristate_simd
-Kind: function
-Use: apply tristate enable mask to tray data
-Location: core/primitives.c:134
+Location: core/primitives.c:18
 
 hebs_eval_and
 Kind: function
 Use: scalar and evaluation for fallback path
-Location: core/primitives.c:148
+Location: core/primitives.c:31
 
 hebs_eval_or
 Kind: function
 Use: scalar or evaluation for fallback path
-Location: core/primitives.c:166
+Location: core/primitives.c:49
 
 hebs_eval_xor
 Kind: function
 Use: scalar xor evaluation for fallback path
-Location: core/primitives.c:184
+Location: core/primitives.c:67
 
 hebs_eval_nand
 Kind: function
 Use: scalar nand evaluation for fallback path
-Location: core/primitives.c:208
+Location: core/primitives.c:91
 
 hebs_eval_nor
 Kind: function
 Use: scalar nor evaluation for fallback path
-Location: core/primitives.c:214
+Location: core/primitives.c:97
 
 hebs_eval_xnor
 Kind: function
 Use: scalar xnor evaluation for fallback path
-Location: core/primitives.c:220
+Location: core/primitives.c:103
 
 hebs_eval_not
 Kind: function
 Use: scalar not evaluation for fallback path
-Location: core/primitives.c:226
+Location: core/primitives.c:109
 
 hebs_eval_buf
 Kind: function
 Use: scalar buffer evaluation for fallback path
-Location: core/primitives.c:252
+Location: core/primitives.c:135
 
 hebs_eval_weak_pull
 Kind: function
 Use: scalar weak pull evaluation
-Location: core/primitives.c:258
+Location: core/primitives.c:141
 
 hebs_eval_weak_pull_down
 Kind: function
 Use: scalar weak pull down evaluation
-Location: core/primitives.c:280
+Location: core/primitives.c:163
 
 hebs_eval_strong_pull
 Kind: function
 Use: scalar strong pull evaluation
-Location: core/primitives.c:286
+Location: core/primitives.c:169
 
 hebs_eval_vcc
 Kind: function
 Use: scalar constant high source
-Location: core/primitives.c:307
+Location: core/primitives.c:190
 
 hebs_eval_gnd
 Kind: function
 Use: scalar constant low source
-Location: core/primitives.c:313
+Location: core/primitives.c:196
 
 hebs_eval_tristate
 Kind: function
 Use: scalar tristate behavior evaluation
-Location: core/primitives.c:319
-
-hebs_sequential_commit
-Kind: function
-Use: standalone helper that commits staged DFF tray results outside the live hebs_tick path
-Location: core/state_manager.c:99
+Location: core/primitives.c:202
 
 6 Type Registry
 
@@ -523,25 +448,10 @@ Kind: macro
 Use: compile time gate for compatibility probe updates
 Location: include/hebs_probe_profile.h:13
 
-HEBS_PLANE_LOW_MASK
-Kind: macro
-Use: bit mask for low plane bits in packed trays
-Location: core/primitives.c:4
-
-HEBS_PLANE_HIGH_MASK
-Kind: macro
-Use: bit mask for high plane bits in packed trays
-Location: core/primitives.c:5
-
-HEBS_DFF_SCALAR_THRESHOLD
-Kind: macro
-Use: threshold to switch sequential commit scalar path and vectorized path
-Location: core/state_manager.c:4
-
 HEBS_LUT_RESOLVE
 Kind: constant
 Use: logic resolution lookup table for scalar state merge
-Location: core/primitives.c:8
+Location: core/primitives.c:5
 
 HEBS_COMB_GATE_ORDER
 Kind: constant

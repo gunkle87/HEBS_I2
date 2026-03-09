@@ -89,13 +89,8 @@ static uint8_t read_net_xflag(const hebs_engine* engine, uint32_t net_id)
 
 }
 
-static hebs_plan* load_single_input_dff_test_plan(const char* path)
+static hebs_plan* load_temp_bench_plan(const char* path, const char* bench_text)
 {
-	static const char* bench_text =
-		"INPUT(contam)\n"
-		"INPUT(data)\n"
-		"OUTPUT(q)\n"
-		"q = DFF(data)\n";
 	FILE* file = fopen(path, "wb");
 	hebs_plan* plan;
 
@@ -105,6 +100,17 @@ static hebs_plan* load_single_input_dff_test_plan(const char* path)
 	plan = hebs_load_bench(path);
 	remove(path);
 	return plan;
+
+}
+
+static hebs_plan* load_single_input_dff_test_plan(const char* path)
+{
+	static const char* bench_text =
+		"INPUT(contam)\n"
+		"INPUT(data)\n"
+		"OUTPUT(q)\n"
+		"q = DFF(data)\n";
+	return load_temp_bench_plan(path, bench_text);
 
 }
 
@@ -918,9 +924,6 @@ static void test_protocol_helper_stats(void)
 
 static void test_extended_primitive_suite(void)
 {
-	uint64_t tri_data;
-	uint64_t tri_enable;
-
 	assert(hebs_eval_xor(HEBS_S0, HEBS_S0) == HEBS_S0);
 	assert(hebs_eval_xor(HEBS_S1, HEBS_S0) == HEBS_S1);
 	assert(hebs_eval_nand(HEBS_S1, HEBS_S1) == HEBS_S0);
@@ -933,17 +936,6 @@ static void test_extended_primitive_suite(void)
 	assert(hebs_eval_gnd() == HEBS_S0);
 	assert(hebs_eval_tristate(HEBS_S1, HEBS_S1) == HEBS_S1);
 	assert(hebs_eval_tristate(HEBS_S1, HEBS_S0) == HEBS_Z);
-
-	assert(hebs_gate_buf_simd(0x1234567890ABCDEFULL) == 0x1234567890ABCDEFULL);
-	assert(hebs_gate_vcc_simd() == 0x5555555555555555ULL);
-	assert(hebs_gate_gnd_simd() == 0x0ULL);
-
-	tri_data = 0xAAAAAAAAAAAAAAAAULL;
-	tri_enable = 0x5555555555555555ULL;
-	assert(hebs_gate_tristate_simd(tri_data, tri_enable) == tri_data);
-
-	tri_enable = 0x0ULL;
-	assert(hebs_gate_tristate_simd(tri_data, tri_enable) == 0x0ULL);
 
 }
 
@@ -1048,6 +1040,54 @@ static void test_loaded_dff_unknown_capture_ignores_unrelated_state(void)
 
 }
 
+static void test_loader_batched_specialized_span_execution(void)
+{
+	static const char* bench_text =
+		"INPUT(a)\n"
+		"INPUT(b)\n"
+		"INPUT(en)\n"
+		"n_and = AND(a,b)\n"
+		"n_or = OR(a,b)\n"
+		"n_xor = XOR(a,b)\n"
+		"n_nand = NAND(a,b)\n"
+		"n_nor = NOR(a,b)\n"
+		"n_not = NOT(a)\n"
+		"n_buf = BUF(b)\n"
+		"n_xnor = XNOR(a,b)\n"
+		"n_vcc = VCC()\n"
+		"n_gnd = GND()\n"
+		"n_tri = TRI(a,en)\n";
+	hebs_plan* plan = load_temp_bench_plan("build/test_batched_spans.bench", bench_text);
+	hebs_engine engine = { 0 };
+
+	assert(plan != NULL);
+	assert(plan->comb_exec_data != NULL);
+	assert(plan->comb_spans != NULL);
+	assert(plan->comb_span_count > 0U);
+	assert(plan->comb_instruction_count == 11U);
+
+	assert(hebs_init_engine(&engine, plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, plan, 0U, HEBS_S1) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, plan, 1U, HEBS_S0) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, plan, 2U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, plan);
+
+	assert((uint8_t)read_signal_state(&engine, 3U) == 0x0U);
+	assert((uint8_t)read_signal_state(&engine, 4U) == 0x1U);
+	assert((uint8_t)read_signal_state(&engine, 5U) == 0x1U);
+	assert((uint8_t)read_signal_state(&engine, 6U) == 0x1U);
+	assert((uint8_t)read_signal_state(&engine, 7U) == 0x0U);
+	assert((uint8_t)read_signal_state(&engine, 8U) == 0x0U);
+	assert((uint8_t)read_signal_state(&engine, 9U) == 0x0U);
+	assert((uint8_t)read_signal_state(&engine, 10U) == 0x0U);
+	assert((uint8_t)read_signal_state(&engine, 11U) == 0x1U);
+	assert((uint8_t)read_signal_state(&engine, 12U) == 0x0U);
+	assert((uint8_t)read_signal_state(&engine, 13U) == 0x1U);
+
+	hebs_free_plan(plan);
+
+}
+
 static void test_init_rejects_oversized_signal_count(void)
 {
 	hebs_engine engine = { 0 };
@@ -1124,6 +1164,7 @@ int main(void)
 	test_engine_fact_accessors();
 	test_loaded_dff_captures_declared_data_only();
 	test_loaded_dff_unknown_capture_ignores_unrelated_state();
+	test_loader_batched_specialized_span_execution();
 	test_init_rejects_oversized_signal_count();
 	test_fallback_invalid_src_b_is_safely_skipped();
 	return 0;

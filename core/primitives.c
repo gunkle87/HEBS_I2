@@ -1,9 +1,6 @@
 #include "hebs_engine.h"
 #include "primitives.h"
 
-#define HEBS_PLANE_LOW_MASK  0x5555555555555555ULL
-#define HEBS_PLANE_HIGH_MASK 0xAAAAAAAAAAAAAAAAULL
-
 /* HEBS 8-state contention resolution table. */
 static const uint8_t HEBS_LUT_RESOLVE[8][8] =
 {
@@ -18,124 +15,10 @@ static const uint8_t HEBS_LUT_RESOLVE[8][8] =
 	/* WX */ { HEBS_S0, HEBS_S1, HEBS_WX, HEBS_WX, HEBS_WX, HEBS_X,  HEBS_SX, HEBS_WX }
 };
 
-static uint64_t hebs_pack_planes(uint64_t low_plane, uint64_t high_plane)
-{
-	return (low_plane & HEBS_PLANE_LOW_MASK) | (high_plane & HEBS_PLANE_HIGH_MASK);
-
-}
-
 hebs_logic_t hebs_resolve_states(hebs_logic_t a, hebs_logic_t b)
 {
 	return (hebs_logic_t)HEBS_LUT_RESOLVE[(uint8_t)a][(uint8_t)b];
 
-}
-
-uint64_t hebs_gate_and_simd(uint64_t tray_a, uint64_t tray_b)
-{
-	uint64_t a_low = tray_a & HEBS_PLANE_LOW_MASK;
-	uint64_t b_low = tray_b & HEBS_PLANE_LOW_MASK;
-	uint64_t a_high = tray_a & HEBS_PLANE_HIGH_MASK;
-	uint64_t b_high = tray_b & HEBS_PLANE_HIGH_MASK;
-	uint64_t res_low = a_low & b_low;
-	uint64_t res_high = a_high | b_high;
-	return hebs_pack_planes(res_low, res_high);
-
-}
-
-uint64_t hebs_gate_or_simd(uint64_t tray_a, uint64_t tray_b)
-{
-	uint64_t a_low = tray_a & HEBS_PLANE_LOW_MASK;
-	uint64_t b_low = tray_b & HEBS_PLANE_LOW_MASK;
-	uint64_t a_high = tray_a & HEBS_PLANE_HIGH_MASK;
-	uint64_t b_high = tray_b & HEBS_PLANE_HIGH_MASK;
-	uint64_t res_low = a_low | b_low;
-	uint64_t res_high = a_high & b_high;
-	return hebs_pack_planes(res_low, res_high);
-
-}
-
-uint64_t hebs_gate_xor_simd(uint64_t tray_a, uint64_t tray_b)
-{
-	uint64_t a_low = tray_a & HEBS_PLANE_LOW_MASK;
-	uint64_t b_low = tray_b & HEBS_PLANE_LOW_MASK;
-	uint64_t a_high = tray_a & HEBS_PLANE_HIGH_MASK;
-	uint64_t b_high = tray_b & HEBS_PLANE_HIGH_MASK;
-	uint64_t res_low = a_low ^ b_low;
-	uint64_t res_high = a_high | b_high;
-	return hebs_pack_planes(res_low, res_high);
-
-}
-
-uint64_t hebs_gate_nand_simd(uint64_t tray_a, uint64_t tray_b)
-{
-	return hebs_gate_not_simd(hebs_gate_and_simd(tray_a, tray_b));
-
-}
-
-uint64_t hebs_gate_nor_simd(uint64_t tray_a, uint64_t tray_b)
-{
-	return hebs_gate_not_simd(hebs_gate_or_simd(tray_a, tray_b));
-
-}
-
-uint64_t hebs_gate_xnor_simd(uint64_t tray_a, uint64_t tray_b)
-{
-	return hebs_gate_not_simd(hebs_gate_xor_simd(tray_a, tray_b));
-
-}
-
-uint64_t hebs_gate_not_simd(uint64_t tray_a)
-{
-	uint64_t res_low = (~tray_a) & HEBS_PLANE_LOW_MASK;
-	uint64_t res_high = tray_a & HEBS_PLANE_HIGH_MASK;
-	return hebs_pack_planes(res_low, res_high);
-
-}
-
-uint64_t hebs_gate_buf_simd(uint64_t tray_a)
-{
-	return tray_a;
-
-}
-
-uint64_t hebs_gate_weak_pull_simd(uint64_t tray_a)
-{
-	uint64_t res_low = (tray_a & HEBS_PLANE_LOW_MASK) | HEBS_PLANE_LOW_MASK;
-	uint64_t res_high = tray_a & HEBS_PLANE_HIGH_MASK;
-	return hebs_pack_planes(res_low, res_high);
-
-}
-
-uint64_t hebs_gate_weak_pull_down_simd(uint64_t tray_a)
-{
-	return hebs_gate_not_simd(hebs_gate_weak_pull_simd(hebs_gate_not_simd(tray_a)));
-
-}
-
-uint64_t hebs_gate_strong_pull_simd(uint64_t tray_a)
-{
-	(void)tray_a;
-	return HEBS_PLANE_LOW_MASK;
-
-}
-
-uint64_t hebs_gate_vcc_simd(void)
-{
-	return HEBS_PLANE_LOW_MASK;
-
-}
-
-uint64_t hebs_gate_gnd_simd(void)
-{
-	return 0ULL;
-
-}
-
-uint64_t hebs_gate_tristate_simd(uint64_t tray_data, uint64_t tray_enable)
-{
-	uint64_t enable_low = tray_enable & HEBS_PLANE_LOW_MASK;
-	uint64_t enable_pair_mask = enable_low | (enable_low << 1U);
-	return tray_data & enable_pair_mask;
 
 }
 
