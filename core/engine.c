@@ -22,16 +22,32 @@ typedef enum hebs_drive_kind_e
 
 } hebs_drive_kind_t;
 
-static const uint8_t HEBS_RESOLVE_ACCUM_LUT[8][7] =
+static const uint8_t HEBS_RESOLVE_ACCUM_LUT[64] =
 {
-	{ HEBS_STATE_Z, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX },
-	{ HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_S1 },
-	{ HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_S0, HEBS_STATE_S0, HEBS_STATE_S0 },
-	{ HEBS_STATE_X, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX },
-	{ HEBS_STATE_W1, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_WX, HEBS_STATE_WX },
-	{ HEBS_STATE_W0, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_WX, HEBS_STATE_W0, HEBS_STATE_WX },
-	{ HEBS_STATE_WX, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_WX, HEBS_STATE_WX, HEBS_STATE_WX },
-	{ HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX }
+	HEBS_STATE_Z,  HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX, HEBS_STATE_Z,
+	HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_S1, HEBS_STATE_S1,
+	HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_S0, HEBS_STATE_S0, HEBS_STATE_S0, HEBS_STATE_S0,
+	HEBS_STATE_X,  HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX, HEBS_STATE_X,
+	HEBS_STATE_W1, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_W1, HEBS_STATE_WX, HEBS_STATE_WX, HEBS_STATE_W1,
+	HEBS_STATE_W0, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_WX, HEBS_STATE_W0, HEBS_STATE_WX, HEBS_STATE_W0,
+	HEBS_STATE_WX, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX, HEBS_STATE_WX, HEBS_STATE_WX, HEBS_STATE_WX, HEBS_STATE_WX,
+	HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX, HEBS_STATE_SX
+};
+
+static const uint8_t HEBS_DRIVE_TO_STATE[8] =
+{
+	HEBS_STATE_Z, HEBS_STATE_S1, HEBS_STATE_S0, HEBS_STATE_SX,
+	HEBS_STATE_W1, HEBS_STATE_W0, HEBS_STATE_WX, HEBS_STATE_Z
+};
+
+static const uint8_t HEBS_STRONG_DRIVE_FROM_PSTATE[4] =
+{
+	HEBS_DRIVE_S0, HEBS_DRIVE_S1, HEBS_DRIVE_SX, HEBS_DRIVE_SX
+};
+
+static const uint8_t HEBS_WEAK_DRIVE_FROM_PSTATE[4] =
+{
+	HEBS_DRIVE_W0, HEBS_DRIVE_W1, HEBS_DRIVE_WX, HEBS_DRIVE_WX
 };
 
 static const uint8_t HEBS_STATE_TO_PSTATE[8] =
@@ -83,29 +99,14 @@ static void hebs_write_pstate_net(hebs_engine* ctx, uint32_t net_id, uint8_t pst
 
 static uint8_t hebs_make_drive_kind(uint8_t logic_bit, uint8_t x_flag, uint8_t strong_drive)
 {
-	const uint8_t logic = (uint8_t)(logic_bit & 1U);
-	const uint8_t x = (uint8_t)(x_flag & 1U);
-	const uint8_t strong = (uint8_t)(strong_drive & 1U);
-
-	if (x != 0U)
-	{
-		return (strong != 0U) ? HEBS_DRIVE_SX : HEBS_DRIVE_WX;
-
-	}
-
-	if (strong != 0U)
-	{
-		return (logic != 0U) ? HEBS_DRIVE_S1 : HEBS_DRIVE_S0;
-
-	}
-
-	return (logic != 0U) ? HEBS_DRIVE_W1 : HEBS_DRIVE_W0;
+	const uint8_t pstate = (uint8_t)((x_flag << 1U) | logic_bit);
+	return (strong_drive != 0U) ? HEBS_STRONG_DRIVE_FROM_PSTATE[pstate] : HEBS_WEAK_DRIVE_FROM_PSTATE[pstate];
 
 }
 
 static void hebs_accumulate_drive(hebs_engine* ctx, uint32_t net_id, uint8_t drive_kind)
 {
-	if ((drive_kind & 0x7U) == HEBS_DRIVE_NONE)
+	if (drive_kind == HEBS_DRIVE_NONE)
 	{
 		return;
 
@@ -115,11 +116,12 @@ static void hebs_accumulate_drive(hebs_engine* ctx, uint32_t net_id, uint8_t dri
 	{
 		ctx->dirty_net_flags[net_id] = 1U;
 		ctx->dirty_net_ids[ctx->dirty_count++] = net_id;
-		ctx->pending_state[net_id] = HEBS_STATE_Z;
+		ctx->pending_state[net_id] = HEBS_DRIVE_TO_STATE[drive_kind];
+		return;
 
 	}
 
-	ctx->pending_state[net_id] = HEBS_RESOLVE_ACCUM_LUT[ctx->pending_state[net_id] & 0x7U][drive_kind & 0x7U];
+	ctx->pending_state[net_id] = HEBS_RESOLVE_ACCUM_LUT[(ctx->pending_state[net_id] << 3U) | drive_kind];
 
 }
 
@@ -739,7 +741,7 @@ static void hebs_execute_tri_span(
 		en_x = b_x;
 		m_high = (uint8_t)(0U - en_high);
 		m_x = (uint8_t)(0U - en_x);
-		data_drive = hebs_make_drive_kind(a_l, a_x, 1U);
+		data_drive = HEBS_STRONG_DRIVE_FROM_PSTATE[(a_x << 1U) | a_l];
 		drive_kind = (uint8_t)((m_high & data_drive) | (m_x & HEBS_DRIVE_SX));
 
 		hebs_accumulate_drive(ctx, dst_net_id, drive_kind);
@@ -978,7 +980,6 @@ static void hebs_phase_materialize_pending(hebs_engine* ctx)
 
 		net_physical[net_id] = resolved_3bn;
 		hebs_write_pstate_net(ctx, net_id, HEBS_STATE_TO_PSTATE[resolved_3bn]);
-		ctx->pending_state[net_id] = HEBS_STATE_Z;
 		ctx->dirty_net_flags[net_id] = 0U;
 #if HEBS_TEST_PROBES
 		ctx->probe_state_change_commit += (uint64_t)(old_value != resolved_3bn);
