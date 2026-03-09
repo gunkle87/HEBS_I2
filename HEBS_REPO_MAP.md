@@ -40,7 +40,7 @@ tests/results
 4 File Index
 
 engine.c
-Purpose: simulation tick execution, combinational execution paths, and probe snapshot export
+Purpose: span-kernel based combinational execution, mailbox accumulation, dirty-net resolve, and probe snapshot export
 Location: core/engine.c
 
 loader.c
@@ -122,57 +122,57 @@ Location: core/loader.c:1421
 hebs_init_engine
 Kind: function
 Use: initialize engine state from a plan and reset probes
-Location: core/engine.c:786
+Location: core/engine.c:916
 
 hebs_tick
 Kind: function
-Use: execute one simulation tick with combinational and sequential phases
-Location: core/engine.c:833
+Use: execute one simulation tick with combinational evaluate, resolve, and DFF commit phases
+Location: core/engine.c:972
 
 hebs_get_probes
 Kind: function
 Use: return a raw probe snapshot from engine state
-Location: core/engine.c:866
+Location: core/engine.c:995
 
 hebs_get_run_status
 Kind: function
 Use: return current engine run status facts without deriving metrics
-Location: core/engine.c:887
+Location: core/engine.c:1018
 
 hebs_get_state_hash
 Kind: function
 Use: compute hash of current engine trays and tick
-Location: core/engine.c:908
+Location: core/engine.c:1036
 
 hebs_get_final_crc32
 Kind: function
 Use: return crc32 fingerprint over current active signal trays
-Location: core/engine.c:931
+Location: core/engine.c:1062
 
 hebs_get_plan_hash
 Kind: function
 Use: return immutable plan hash from a loaded plan
-Location: core/engine.c:943
+Location: core/engine.c:1074
 
 hebs_get_plan_metadata
 Kind: function
 Use: copy static plan metadata facts into a snapshot struct
-Location: core/engine.c:955
+Location: core/engine.c:1086
 
 hebs_set_primary_input
 Kind: function
 Use: apply primary input value to engine tray storage
-Location: core/engine.c:981
+Location: core/engine.c:1112
 
 hebs_get_primary_input
 Kind: function
 Use: read primary input value from engine state
-Location: core/engine.c:1024
+Location: core/engine.c:1178
 
 hebs_get_signal_tray
 Kind: function
 Use: expose tray pointer for read access by tray index
-Location: core/engine.c:1041
+Location: core/engine.c:1191
 
 hebs_resolve_states
 Kind: function
@@ -522,11 +522,6 @@ HEBS_COMPAT_PROBES_ENABLED
 Kind: macro
 Use: compile time gate for compatibility probe updates
 Location: include/hebs_probe_profile.h:13
-
-HEBS_FLUSH_CHUNK_PROBES
-Kind: macro
-Use: flush chunk level probe counters after batched chunk execution
-Location: core/engine.c:91
 
 HEBS_PLANE_LOW_MASK
 Kind: macro
@@ -1265,7 +1260,7 @@ Tray
 Packed signal storage word that carries multiple two bit logic lanes.
 
 Tick
-One simulation step that runs combinational and sequential phases.
+One simulation step that runs combinational evaluate, resolve, and DFF commit phases.
 
 Event
 State transition effect applied by gate and sequential execution paths.
