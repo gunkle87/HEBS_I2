@@ -89,11 +89,6 @@ static void hebs_write_pstate_to_trays(uint64_t* trays, uint32_t net_id, uint8_t
 static void hebs_write_pstate_net(hebs_engine* ctx, uint32_t net_id, uint8_t pstate)
 {
 	hebs_write_pstate_to_trays(ctx->signal_trays, net_id, pstate);
-	if (ctx->next_signal_trays && ctx->next_signal_trays != ctx->signal_trays)
-	{
-		hebs_write_pstate_to_trays(ctx->next_signal_trays, net_id, pstate);
-
-	}
 
 }
 
@@ -1079,7 +1074,6 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 	memset(ctx->dirty_net_ids, 0, sizeof(ctx->dirty_net_ids));
 	memset(ctx->dirty_net_flags, 0, sizeof(ctx->dirty_net_flags));
 	ctx->signal_trays = ctx->tray_plane_a;
-	ctx->next_signal_trays = ctx->tray_plane_a;
 
 	for (net_id = 0U; net_id < ctx->net_count; ++net_id)
 	{

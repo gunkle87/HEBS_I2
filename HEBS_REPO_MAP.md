@@ -1017,12 +1017,6 @@ Use: pointer to active signal tray buffer
 Parent: hebs_engine_s
 Location: include/hebs_engine.h:172
 
-hebs_engine_s.next_signal_trays
-Kind: field
-Use: pointer to next signal tray buffer
-Parent: hebs_engine_s
-Location: include/hebs_engine.h:173
-
 hebs_engine_s.cycles_executed
 Kind: field
 Use: total executed cycle counter

@@ -163,7 +163,6 @@ typedef struct hebs_engine_s
 	uint8_t dirty_net_flags[HEBS_MAX_SIGNALS];
 	uint32_t dirty_count;
 	uint64_t* signal_trays;
-	uint64_t* next_signal_trays;
 	uint64_t cycles_executed;
 	uint64_t vectors_applied;
 	hebs_status_t last_status;
