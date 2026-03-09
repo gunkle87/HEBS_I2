@@ -981,6 +981,58 @@ static void test_engine_fact_accessors(void)
 
 }
 
+static void test_init_rejects_oversized_signal_count(void)
+{
+	hebs_engine engine = { 0 };
+	hebs_plan plan = { 0 };
+
+	plan.signal_count = HEBS_MAX_SIGNALS + 1U;
+	plan.tray_count = 1U;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_ERR_LOGIC);
+	assert(engine.last_status == HEBS_ERR_LOGIC);
+
+}
+
+static void test_fallback_invalid_src_b_is_safely_skipped(void)
+{
+	hebs_engine engine = { 0 };
+	uint32_t primary_inputs[1] = { 0U };
+	hebs_lep_instruction_t lep_data[1];
+	hebs_plan plan = { 0 };
+	hebs_probes probes;
+
+	lep_data[0].gate_type = (uint8_t)HEBS_GATE_OR;
+	lep_data[0].input_count = 2U;
+	lep_data[0].level = 1U;
+	lep_data[0].src_a_bit_offset = net_to_bit(0U);
+	lep_data[0].src_b_bit_offset = net_to_bit(99U);
+	lep_data[0].dst_bit_offset = net_to_bit(2U);
+
+	plan.lep_hash = 10011U;
+	plan.level_count = 2U;
+	plan.num_primary_inputs = 1U;
+	plan.signal_count = 3U;
+	plan.gate_count = 1U;
+	plan.tray_count = 1U;
+	plan.max_level = 1U;
+	plan.primary_input_ids = primary_inputs;
+	plan.lep_data = lep_data;
+	plan.comb_exec_data = NULL;
+	plan.comb_spans = NULL;
+	plan.comb_span_count = 0U;
+
+	assert(hebs_init_engine(&engine, &plan) == HEBS_OK);
+	assert(hebs_set_primary_input(&engine, &plan, 0U, HEBS_S1) == HEBS_OK);
+	hebs_tick(&engine, &plan);
+	probes = hebs_get_probes(&engine);
+
+	assert((uint8_t)read_signal_state(&engine, 2U) == 0x0U);
+	assert(probes.chunk_exec == 0U);
+	assert(probes.gate_eval == 0U);
+
+}
+
 int main(void)
 {
 	assert(HEBS_S1 == 1);
@@ -1003,6 +1055,8 @@ int main(void)
 	test_protocol_helper_stats();
 	test_extended_primitive_suite();
 	test_engine_fact_accessors();
+	test_init_rejects_oversized_signal_count();
+	test_fallback_invalid_src_b_is_safely_skipped();
 	return 0;
 
 }

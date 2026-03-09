@@ -731,32 +731,61 @@ static void hebs_phase_evaluate_fallback(hebs_engine* ctx, const hebs_plan* plan
 	for (instr_idx = 0U; instr_idx < plan->gate_count; ++instr_idx)
 	{
 		const hebs_lep_instruction_t* const instr = &plan->lep_data[instr_idx];
+		const hebs_gate_type_t gate_type = (hebs_gate_type_t)instr->gate_type;
 		const uint32_t dst_net_id = instr->dst_bit_offset >> 1U;
 		const uint32_t src_a_net_id = instr->src_a_bit_offset >> 1U;
 		const uint32_t src_b_net_id = instr->src_b_bit_offset >> 1U;
-		const uint8_t src_a_pstate = hebs_read_pstate_net(ctx, src_a_net_id);
-		const uint8_t src_b_pstate = hebs_read_pstate_net(ctx, src_b_net_id);
-		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
-		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
-		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
-		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		uint8_t src_a_pstate = 0U;
+		uint8_t src_b_pstate = 0U;
+		uint8_t a_l = 0U;
+		uint8_t a_x = 0U;
+		uint8_t b_l = 0U;
+		uint8_t b_x = 0U;
 		uint8_t drive_nibble = 0xCU;
 
-		if ((hebs_gate_type_t)instr->gate_type == HEBS_GATE_DFF)
+		if (gate_type == HEBS_GATE_DFF)
 		{
 			continue;
 
 		}
 
-		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		if (dst_net_id >= ctx->net_count)
 		{
 			continue;
+
+		}
+
+		if (instr->input_count > 0U && src_a_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		if (instr->input_count > 1U && src_b_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		if (instr->input_count > 0U)
+		{
+			src_a_pstate = hebs_read_pstate_net(ctx, src_a_net_id);
+			a_l = (uint8_t)(src_a_pstate & 1U);
+			a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+
+		}
+
+		if (instr->input_count > 1U)
+		{
+			src_b_pstate = hebs_read_pstate_net(ctx, src_b_net_id);
+			b_l = (uint8_t)(src_b_pstate & 1U);
+			b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
 
 		}
 
 		ctx->probe_chunk_exec += 1U;
 		ctx->probe_gate_eval += 1U;
-		switch ((hebs_gate_type_t)instr->gate_type)
+		switch (gate_type)
 		{
 			case HEBS_GATE_AND:
 				drive_nibble = hebs_make_drive_nibble(
@@ -928,7 +957,9 @@ hebs_status_t hebs_init_engine(hebs_engine* ctx, hebs_plan* plan)
 
 	}
 
-	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS || plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
+	if (plan->tray_count > HEBS_MAX_SIGNAL_TRAYS ||
+		plan->signal_count > HEBS_MAX_SIGNALS ||
+		plan->num_primary_inputs > HEBS_MAX_PRIMARY_INPUTS)
 	{
 		ctx->last_status = HEBS_ERR_LOGIC;
 		return HEBS_ERR_LOGIC;
