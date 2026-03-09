@@ -629,6 +629,125 @@ static void hebs_execute_gnd_span(
 
 }
 
+static void hebs_execute_pup_span(
+	hebs_engine* ctx,
+	const hebs_exec_instruction_t* exec_base,
+	uint32_t count)
+{
+	uint32_t local_idx;
+
+	for (local_idx = 0U; local_idx < count; ++local_idx)
+	{
+		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
+		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
+		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
+		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+
+		(void)src_b_tray;
+
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		{
+			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
+			const uint8_t out_x = a_x;
+			const uint8_t out_l = (uint8_t)((a_l | src_is_z) & (uint8_t)(a_x ^ 1U));
+			const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 0U);
+			hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+
+		}
+
+	}
+
+}
+
+static void hebs_execute_pdn_span(
+	hebs_engine* ctx,
+	const hebs_exec_instruction_t* exec_base,
+	uint32_t count)
+{
+	uint32_t local_idx;
+
+	for (local_idx = 0U; local_idx < count; ++local_idx)
+	{
+		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
+		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
+		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
+		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+
+		(void)src_b_tray;
+
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		{
+			const uint8_t src_is_z = (uint8_t)(ctx->net_physical[src_a_net_id] == HEBS_STATE_Z);
+			const uint8_t out_x = a_x;
+			const uint8_t out_l = (uint8_t)((a_l & (uint8_t)(src_is_z ^ 1U)) & (uint8_t)(a_x ^ 1U));
+			const uint8_t drive_nibble = hebs_make_drive_nibble(out_l, out_x, 0U);
+			hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+
+		}
+
+	}
+
+}
+
+static void hebs_execute_tri_span(
+	hebs_engine* ctx,
+	const hebs_exec_instruction_t* exec_base,
+	uint32_t count)
+{
+	uint32_t local_idx;
+
+	for (local_idx = 0U; local_idx < count; ++local_idx)
+	{
+		const hebs_exec_instruction_t* const exec_instr = &exec_base[local_idx];
+		const uint32_t dst_net_id = hebs_net_id_from_tray_shift(exec_instr->dst_tray, exec_instr->dst_shift);
+		const uint32_t src_a_net_id = hebs_net_id_from_tray_shift(exec_instr->src_a_tray, exec_instr->src_a_shift);
+		const uint64_t src_a_tray = (exec_instr->src_a_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_a_tray] : 0ULL;
+		const uint64_t src_b_tray = (exec_instr->src_b_tray < ctx->tray_count) ? ctx->signal_trays[exec_instr->src_b_tray] : 0ULL;
+		const uint8_t src_a_pstate = hebs_read_pstate_from_word(src_a_tray, exec_instr->src_a_shift);
+		const uint8_t src_b_pstate = hebs_read_pstate_from_word(src_b_tray, exec_instr->src_b_shift);
+		const uint8_t a_l = (uint8_t)(src_a_pstate & 1U);
+		const uint8_t a_x = (uint8_t)((src_a_pstate >> 1U) & 1U);
+		const uint8_t b_l = (uint8_t)(src_b_pstate & 1U);
+		const uint8_t b_x = (uint8_t)((src_b_pstate >> 1U) & 1U);
+		const uint8_t en_valid = (uint8_t)(b_x ^ 1U);
+		const uint8_t en_high = (uint8_t)(en_valid & b_l);
+		const uint8_t en_x = b_x;
+		const uint8_t m_high = (uint8_t)(0U - en_high);
+		const uint8_t m_x = (uint8_t)(0U - en_x);
+		const uint8_t data_drive = hebs_make_drive_nibble(a_l, a_x, 1U);
+		const uint8_t x_drive = 0xCU;
+		const uint8_t drive_nibble = (uint8_t)((m_high & data_drive) | (m_x & x_drive));
+
+		if (dst_net_id >= ctx->net_count || src_a_net_id >= ctx->net_count)
+		{
+			continue;
+
+		}
+
+		hebs_mailbox_or(ctx, dst_net_id, drive_nibble);
+
+	}
+
+}
+
 static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 {
 	uint32_t span_idx;
@@ -708,6 +827,27 @@ static void hebs_phase_evaluate_batched(hebs_engine* ctx, const hebs_plan* plan)
 		if (span->gate_type == HEBS_GATE_GND)
 		{
 			hebs_execute_gnd_span(ctx, exec_base, span->count);
+			continue;
+
+		}
+
+		if (span->gate_type == HEBS_GATE_PUP)
+		{
+			hebs_execute_pup_span(ctx, exec_base, span->count);
+			continue;
+
+		}
+
+		if (span->gate_type == HEBS_GATE_PDN)
+		{
+			hebs_execute_pdn_span(ctx, exec_base, span->count);
+			continue;
+
+		}
+
+		if (span->gate_type == HEBS_GATE_TRI)
+		{
+			hebs_execute_tri_span(ctx, exec_base, span->count);
 			continue;
 
 		}
